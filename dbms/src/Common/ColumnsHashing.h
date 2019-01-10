@@ -452,13 +452,13 @@ struct HashMethodSingleLowCardinalityColumn : public SingleColumnMethod
         return typename HashTableTraits<Data>::getMapped(*it);
     }
 
-//    ALWAYS_INLINE bool isNullAt(size_t i)
-//    {
-//        if (!is_nullable)
-//            return false;
-//
-//        return getIndexAt(i) == 0;
-//    }
+    ALWAYS_INLINE bool isNullAt(size_t i)
+    {
+        if (!is_nullable)
+            return false;
+
+        return getIndexAt(i) == 0;
+    }
 
     ALWAYS_INLINE void cacheAggregateData(size_t i, AggregateDataPtr data)
     {
@@ -751,7 +751,6 @@ struct HashMethodKeysFixed : private columns_hashing_impl::BaseStateKeysFixed<Ke
   * That is, for example, for strings, it contains first the serialized length of the string, and then the bytes.
   * Therefore, when aggregating by several strings, there is no ambiguity.
   */
-template <typename TData>
 struct HashMethodSerialized
 {
     ColumnRawPtrs key_columns;
