@@ -578,6 +578,8 @@ bool StorageMergeTree::tryMutatePart()
     if (!tagger)
         return false;
 
+    MergeList::EntryPtr merge_entry = global_context.getMergeList().insert(database_name, table_name, future_part.name, future_part.parts);
+
     Stopwatch stopwatch;
     MergeTreeData::MutableDataPartPtr new_part;
 
@@ -603,6 +605,9 @@ bool StorageMergeTree::tryMutatePart()
             part_log_elem.table_name = table_name;
             part_log_elem.part_name = future_part.name;
 
+            part_log_elem.rows_read = (*merge_entry)->rows_read;
+            part_log_elem.bytes_read_uncompressed = (*merge_entry)->bytes_read_uncompressed;
+
             if (new_part)
             {
                 part_log_elem.bytes_compressed_on_disk = new_part->bytes_on_disk;
@@ -623,7 +628,7 @@ bool StorageMergeTree::tryMutatePart()
 
     try
     {
-        new_part = merger_mutator.mutatePartToTemporaryPart(future_part, commands, global_context);
+        new_part = merger_mutator.mutatePartToTemporaryPart(future_part, commands, *merge_entry, global_context);
         data.renameTempPartAndReplace(new_part);
         tagger->is_successful = true;
         write_part_log({});

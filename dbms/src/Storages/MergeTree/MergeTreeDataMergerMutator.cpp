@@ -403,61 +403,62 @@ public:
         sum_total = std::max(static_cast<decltype(sum_index_columns)>(1), sum_index_columns + sum_ordinary_columns);
     }
 
-    /// Approximate size of num_rows column elements if column contains num_total_rows elements
-    Float64 columnSize(const String & column, size_t num_rows, size_t num_total_rows) const
+    Float64 columnWeight(const String & column) const
     {
-        return static_cast<Float64>(map.at(column)) / num_total_rows * num_rows;
+        return static_cast<Float64>(map.at(column)) / sum_total;
     }
 
-    /// Relative size of num_rows column elements (in comparison with overall size of all columns) if column contains num_total_rows elements
-    Float64 columnProgress(const String & column, size_t num_rows, size_t num_total_rows) const
+    Float64 keyColumnsWeight() const
     {
-        return columnSize(column, num_rows, num_total_rows) / sum_total;
-    }
-
-    /// Like columnSize, but takes into account only PK columns
-    Float64 keyColumnsSize(size_t num_rows, size_t num_total_rows) const
-    {
-        return static_cast<Float64>(sum_index_columns) / num_total_rows * num_rows;
-    }
-
-    /// Like columnProgress, but takes into account only PK columns
-    Float64 keyColumnsProgress(size_t num_rows, size_t num_total_rows) const
-    {
-        return keyColumnsSize(num_rows, num_total_rows) / sum_total;
+        return static_cast<Float64>(sum_index_columns) / sum_total;
     }
 };
 
-/** Progress callback. Is used by Horizontal merger and first step of Vertical merger.
+/** Progress callback.
   * What it should update:
   * - approximate progress
-  * - amount of merged rows and their size (PK columns subset is used in case of Vertical merge)
+  * - amount of read rows
+  * - various metrics
   * - time elapsed for current merge.
   */
+
+/// The horizontal stage + a stage for each gathered column (if we are doing a Vertical merge)
+/// or a mutation of a single part. During a single stage all rows are read.
+struct MergeStageProgress
+{
+    MergeStageProgress(Float64 weight_)
+        : is_first(true) , weight(weight_)
+    {
+    }
+
+    MergeStageProgress(Float64 initial_progress_, Float64 weight_)
+        : initial_progress(initial_progress_), is_first(false), weight(weight_)
+    {
+    }
+
+    Float64 initial_progress = 0.0;
+    bool is_first;
+    Float64 weight;
+
+    UInt64 total_rows = 0;
+    UInt64 rows_read = 0;
+};
+
 class MergeProgressCallback
 {
 public:
-    MergeProgressCallback(MergeList::Entry & merge_entry_, UInt64 & watch_prev_elapsed_)
-    : merge_entry(merge_entry_), watch_prev_elapsed(watch_prev_elapsed_) {}
-
-    MergeProgressCallback(MergeList::Entry & merge_entry_, size_t num_total_rows, const ColumnSizeEstimator & column_sizes,
-        UInt64 & watch_prev_elapsed_, MergeTreeDataMergerMutator::MergeAlgorithm merge_alg_ = MergeAlgorithm::Vertical)
-    : merge_entry(merge_entry_), watch_prev_elapsed(watch_prev_elapsed_), merge_alg(merge_alg_)
+    MergeProgressCallback(
+        MergeList::Entry & merge_entry_, UInt64 & watch_prev_elapsed_, MergeStageProgress & stage_)
+        : merge_entry(merge_entry_)
+        , watch_prev_elapsed(watch_prev_elapsed_)
+        , stage(stage_)
     {
-        if (num_total_rows)
-        {
-            average_elem_progress = (merge_alg == MergeAlgorithm::Horizontal)
-                ? 1.0 / num_total_rows
-                : column_sizes.keyColumnsProgress(1, num_total_rows);
-        }
-
         updateWatch();
     }
 
     MergeList::Entry & merge_entry;
     UInt64 & watch_prev_elapsed;
-    Float64 average_elem_progress = 0;
-    const MergeAlgorithm merge_alg{MergeAlgorithm::Vertical};
+    MergeStageProgress & stage;
 
     void updateWatch()
     {
@@ -469,46 +470,25 @@ public:
     void operator() (const Progress & value)
     {
         ProfileEvents::increment(ProfileEvents::MergedUncompressedBytes, value.bytes);
-        ProfileEvents::increment(ProfileEvents::MergedRows, value.rows);
+        if (stage.is_first)
+        {
+            merge_entry->rows_read += value.rows;
+            ProfileEvents::increment(ProfileEvents::MergedRows, value.rows);
+        }
         updateWatch();
 
         merge_entry->bytes_read_uncompressed += value.bytes;
-        merge_entry->rows_read += value.rows;
-        merge_entry->progress.store(average_elem_progress * merge_entry->rows_read, std::memory_order_relaxed);
+
+        stage.total_rows += value.total_rows;
+        stage.rows_read += value.rows;
+        if (stage.total_rows > 0)
+        {
+            merge_entry->progress.store(
+                stage.initial_progress + stage.weight * stage.rows_read / stage.total_rows,
+                std::memory_order_relaxed);
+        }
     }
 };
-
-/** Progress callback for gathering step of Vertical merge.
-  * Updates: approximate progress, amount of merged bytes (TODO: two column case should be fixed), elapsed time.
-  */
-class MergeProgressCallbackVerticalStep : public MergeProgressCallback
-{
-public:
-    MergeProgressCallbackVerticalStep(MergeList::Entry & merge_entry_, size_t num_total_rows_exact,
-        const ColumnSizeEstimator & column_sizes, const String & column_name, UInt64 & watch_prev_elapsed_)
-    : MergeProgressCallback(merge_entry_, watch_prev_elapsed_), initial_progress(merge_entry->progress.load(std::memory_order_relaxed))
-    {
-        average_elem_progress = column_sizes.columnProgress(column_name, 1, num_total_rows_exact);
-        updateWatch();
-    }
-
-    Float64 initial_progress;
-    size_t rows_read_internal{0}; // NOTE: not thread safe (to be copyable). It is OK in current single thread use case
-
-    void operator() (const Progress & value)
-    {
-        merge_entry->bytes_read_uncompressed += value.bytes;
-        ProfileEvents::increment(ProfileEvents::MergedUncompressedBytes, value.bytes);
-        updateWatch();
-
-        rows_read_internal += value.rows;
-        Float64 local_progress = average_elem_progress * rows_read_internal;
-
-        /// NOTE: 'progress' is modified by single thread, but it may be concurrently read from MergeListElement::getInfo() (StorageSystemMerges).
-        merge_entry->progress.store(initial_progress + local_progress, std::memory_order_relaxed);
-    }
-};
-
 
 /// parts should be sorted.
 MergeTreeData::MutableDataPartPtr MergeTreeDataMergerMutator::mergePartsToTemporaryPart(
@@ -529,16 +509,6 @@ MergeTreeData::MutableDataPartPtr MergeTreeDataMergerMutator::mergePartsToTempor
     String new_part_tmp_path = data.getFullPath() + TMP_PREFIX + future_part.name + "/";
     if (Poco::File(new_part_tmp_path).exists())
         throw Exception("Directory " + new_part_tmp_path + " already exists", ErrorCodes::DIRECTORY_ALREADY_EXISTS);
-
-    merge_entry->num_parts = parts.size();
-
-    for (const MergeTreeData::DataPartPtr & part : parts)
-    {
-        std::shared_lock<std::shared_mutex> part_lock(part->columns_lock);
-
-        merge_entry->total_size_bytes_compressed += part->bytes_on_disk;
-        merge_entry->total_size_marks += part->marks_count;
-    }
 
     MergeTreeData::DataPart::ColumnToSize merged_column_to_size;
     for (const MergeTreeData::DataPartPtr & part : parts)
@@ -620,15 +590,15 @@ MergeTreeData::MutableDataPartPtr MergeTreeDataMergerMutator::mergePartsToTempor
         }
     }
 
-
+    MergeStageProgress horizontal_stage_progress(
+        merge_alg == MergeAlgorithm::Horizontal ? 1.0 : column_sizes.keyColumnsWeight());
     for (const auto & part : parts)
     {
         auto input = std::make_unique<MergeTreeSequentialBlockInputStream>(
             data, part, merging_column_names, read_with_direct_io, true);
 
         input->setProgressCallback(MergeProgressCallback(
-                merge_entry, sum_input_rows_upper_bound, column_sizes, watch_prev_elapsed, merge_alg));
-
+            merge_entry, watch_prev_elapsed, horizontal_stage_progress));
         if (data.hasPrimaryKey())
             src_streams.emplace_back(std::make_shared<MaterializingBlockInputStream>(
                 std::make_shared<ExpressionBlockInputStream>(BlockInputStreamPtr(std::move(input)), data.sorting_key_expr)));
@@ -735,7 +705,7 @@ MergeTreeData::MutableDataPartPtr MergeTreeDataMergerMutator::mergePartsToTempor
     {
         size_t sum_input_rows_exact = merge_entry->rows_read;
         merge_entry->columns_written = merging_column_names.size();
-        merge_entry->progress.store(column_sizes.keyColumnsProgress(sum_input_rows_exact, sum_input_rows_exact), std::memory_order_relaxed);
+        merge_entry->progress.store(column_sizes.keyColumnsWeight(), std::memory_order_relaxed);
 
         BlockInputStreams column_part_streams(parts.size());
 
@@ -764,13 +734,14 @@ MergeTreeData::MutableDataPartPtr MergeTreeDataMergerMutator::mergePartsToTempor
             Names column_names{column_name};
             Float64 progress_before = merge_entry->progress.load(std::memory_order_relaxed);
 
+            MergeStageProgress column_progress(progress_before, column_sizes.columnWeight(column_name));
             for (size_t part_num = 0; part_num < parts.size(); ++part_num)
             {
                 auto column_part_stream = std::make_shared<MergeTreeSequentialBlockInputStream>(
                     data, parts[part_num], column_names, read_with_direct_io, true);
 
-                column_part_stream->setProgressCallback(MergeProgressCallbackVerticalStep(
-                        merge_entry, sum_input_rows_exact, column_sizes, column_name, watch_prev_elapsed));
+                column_part_stream->setProgressCallback(MergeProgressCallback(
+                        merge_entry, watch_prev_elapsed, column_progress));
 
                 column_part_streams[part_num] = std::move(column_part_stream);
             }
@@ -800,7 +771,7 @@ MergeTreeData::MutableDataPartPtr MergeTreeDataMergerMutator::mergePartsToTempor
 
             merge_entry->columns_written = merging_column_names.size() + column_num;
             merge_entry->bytes_written_uncompressed += column_gathered_stream.getProfileInfo().bytes;
-            merge_entry->progress.store(progress_before + column_sizes.columnProgress(column_name, sum_input_rows_exact, sum_input_rows_exact), std::memory_order_relaxed);
+            merge_entry->progress.store(progress_before + column_sizes.columnWeight(column_name), std::memory_order_relaxed);
 
             if (actions_blocker.isCancelled())
                 throw Exception("Cancelled merging parts", ErrorCodes::ABORTED);
@@ -836,6 +807,7 @@ MergeTreeData::MutableDataPartPtr MergeTreeDataMergerMutator::mergePartsToTempor
 MergeTreeData::MutableDataPartPtr MergeTreeDataMergerMutator::mutatePartToTemporaryPart(
     const FuturePart & future_part,
     const std::vector<MutationCommand> & commands,
+    MergeListEntry & merge_entry,
     const Context & context)
 {
     auto check_not_cancelled = [&]()
@@ -893,6 +865,7 @@ MergeTreeData::MutableDataPartPtr MergeTreeDataMergerMutator::mutatePartToTempor
     NamesAndTypesList all_columns = data.getColumns().getAllPhysical();
 
     Block in_header = in->getHeader();
+    auto * profiling_in = dynamic_cast<IProfilingBlockInputStream *>(in.get());
 
     if (in_header.columns() == all_columns.size())
     {
@@ -901,6 +874,11 @@ MergeTreeData::MutableDataPartPtr MergeTreeDataMergerMutator::mutatePartToTempor
         if (data.hasPrimaryKey())
             in = std::make_shared<MaterializingBlockInputStream>(
                 std::make_shared<ExpressionBlockInputStream>(in, data.primary_key_expr));
+
+        UInt64 watch_prev_elapsed = 0;
+        MergeStageProgress stage_progress(1.0);
+        if (profiling_in)
+            profiling_in->setProgressCallback(MergeProgressCallback(merge_entry, watch_prev_elapsed, stage_progress));
 
         MergeTreeDataPart::MinMaxIndex minmax_idx;
 
@@ -914,6 +892,12 @@ MergeTreeData::MutableDataPartPtr MergeTreeDataMergerMutator::mutatePartToTempor
         {
             minmax_idx.update(block, data.minmax_idx_columns);
             out.write(block);
+
+            if (profiling_in)
+            {
+                merge_entry->rows_written = profiling_in->getProfileInfo().rows;
+                merge_entry->bytes_written_uncompressed = profiling_in->getProfileInfo().bytes;
+            }
         }
 
         new_data_part->partition.assign(source_part->partition);
