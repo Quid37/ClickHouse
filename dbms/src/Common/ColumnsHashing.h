@@ -44,7 +44,7 @@ template <typename First, typename Second>
 struct MappedTraits<PairNoInit<First, Second>>
 {
     using Type = Second *;
-    static Type getMapped(PairNoInit<First, Second> & value) { return &value.second; }
+    static Type & getMapped(PairNoInit<First, Second> & value) { return &value.second; }
     static First & getKey(PairNoInit<First, Second> & value) { return value.first; }
 };
 
@@ -54,7 +54,7 @@ struct HashTableTraits
     using Value = typename Data::value_type;
     using Mapped = typename MappedTraits<Value>::Type;
 
-    static Mapped getMapped(Value & value) { return MappedTraits<Value>::getMapped(value); }
+    static Mapped & getMapped(Value & value) { return MappedTraits<Value>::getMapped(value); }
     static auto & getKey(Value & value) { return MappedTraits<Value>::getKey(value); }
 };
 
@@ -67,7 +67,7 @@ struct LastElementCache
     bool empty = true;
     bool found = false;
 
-    auto getMapped() { return HashTableTraits<Data>::getMapped(value); }
+    auto & getMapped() { return HashTableTraits<Data>::getMapped(value); }
     auto & getKey() { return HashTableTraits<Data>::getKey(value); }
 };
 
@@ -195,6 +195,14 @@ struct HashMethodOneNumber
         return StringRef(reinterpret_cast<const char *>(&value.first), sizeof(value.first));
     }
 
+    /// Cache last result if key was inserted.
+    template <typename Mapped>
+    ALWAYS_INLINE void cacheData(size_t /*row*/, Mapped mapped)
+    {
+        if constexpr (last_elem_cache.consecutive_keys_optimization)
+            last_elem_cache.getMapped() = mapped;
+    }
+
 protected:
     template <typename Value>
     static ALWAYS_INLINE void onNewKey(Value & /*value*/, Arena & /*pool*/) {}
@@ -257,6 +265,13 @@ struct HashMethodString
     static StringRef getValueRef(const Value & value)
     {
         return StringRef(value.first.data, value.first.size);
+    }
+
+    template <typename Mapped>
+    ALWAYS_INLINE void cacheData(size_t /*row*/, Mapped mapped)
+    {
+        if constexpr (last_elem_cache.consecutive_keys_optimization)
+            last_elem_cache.getMapped() = mapped;
     }
 
 protected:
@@ -324,6 +339,13 @@ struct HashMethodFixedString
     static StringRef getValueRef(const Value & value)
     {
         return StringRef(value.first.data, value.first.size);
+    }
+
+    template <typename Mapped>
+    ALWAYS_INLINE void cacheData(size_t /*row*/, Mapped mapped)
+    {
+        if constexpr (last_elem_cache.consecutive_keys_optimization)
+            last_elem_cache.getMapped() = mapped;
     }
 
 protected:
@@ -547,10 +569,11 @@ struct HashMethodSingleLowCardinalityColumn : public SingleColumnMethod
         return getIndexAt(i) == 0;
     }
 
-    ALWAYS_INLINE void cacheAggregateData(size_t i, AggregateDataPtr data)
+    template <typename Mapped>
+    ALWAYS_INLINE void cacheData(size_t i, Mapped mapped)
     {
         size_t row = getIndexAt(i);
-        aggregate_data_cache[row] = data;
+        aggregate_data_cache[row] = mapped;
     }
 
     template <typename Data>
@@ -791,6 +814,13 @@ struct HashMethodKeysFixed : private columns_hashing_impl::BaseStateKeysFixed<ty
     {
         return data.hash(getKey(row));
     }
+
+    template <typename Mapped>
+    ALWAYS_INLINE void cacheData(size_t /*row*/, Mapped mapped)
+    {
+        if constexpr (last_elem_cache.consecutive_keys_optimization)
+            last_elem_cache.getMapped() = mapped;
+    }
 };
 
 /** Hash by concatenating serialized key values.
@@ -839,6 +869,13 @@ struct HashMethodSerialized
         pool.rollback(key.size);
 
         return hash;
+    }
+
+    template <typename Mapped>
+    ALWAYS_INLINE void cacheData(size_t /*row*/, Mapped mapped)
+    {
+        if constexpr (last_elem_cache.consecutive_keys_optimization)
+            last_elem_cache.getMapped() = mapped;
     }
 
 protected:
