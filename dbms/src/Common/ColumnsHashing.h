@@ -154,7 +154,7 @@ struct HashMethodOneNumber
     /// Creates context. Method is called once and result context is used in all threads.
     static HashMethodContextPtr createContext(const HashMethodContext::Settings &) { return nullptr; }
 
-    FieldType getKey(size_t row) { return unalignedLoad<FieldType>(vec + row * sizeof(FieldType)); }
+    FieldType getKey(size_t row) const { return unalignedLoad<FieldType>(vec + row * sizeof(FieldType)); }
 
     /// Emplace key into HashTable or HashMap. If Data is HashMap, returns ptr to value, otherwise nullptr.
     template <typename Data>
@@ -220,7 +220,7 @@ struct HashMethodString
 
     static HashMethodContextPtr createContext(const HashMethodContext::Settings &) { return nullptr; }
 
-    StringRef getKey(size_t row) { return StringRef(chars + offsets[row - 1], offsets[row] - offsets[row - 1] - 1); }
+    StringRef getKey(size_t row) const { return StringRef(chars + offsets[row - 1], offsets[row] - offsets[row - 1] - 1); }
 
     template <typename Data>
     ALWAYS_INLINE typename HashTableTraits<Data>::Mapped emplaceKey(Data & data, size_t row, bool & inserted, Arena & pool)
@@ -288,7 +288,7 @@ struct HashMethodFixedString
 
     static HashMethodContextPtr createContext(const HashMethodContext::Settings &) { return nullptr; }
 
-    StringRef getKey(size_t row) { return StringRef(&(*chars)[row * n], n); }
+    StringRef getKey(size_t row) const { return StringRef(&(*chars)[row * n], n); }
 
     template <typename Data>
     ALWAYS_INLINE typename HashTableTraits<Data>::Mapped emplaceKey(Data & data, size_t row, bool & inserted, Arena & pool)
@@ -751,7 +751,7 @@ struct HashMethodKeysFixed : private columns_hashing_impl::BaseStateKeysFixed<ty
 
     static HashMethodContextPtr createContext(const HashMethodContext::Settings &) { return nullptr; }
 
-    ALWAYS_INLINE Key getKey(size_t row)
+    ALWAYS_INLINE Key getKey(size_t row) const
     {
         if (has_nullable_keys)
         {
