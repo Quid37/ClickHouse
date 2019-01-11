@@ -52,34 +52,93 @@ namespace
         using Mapped = typename MappedTraits<Value>::Type;
 
         static Mapped getMapped(Value & value) { return MappedTraits<Value>::getMapped(value); }
+        static auto & getKey(Value & value) { return Cell::getKey(value); }
     };
 
-    template <typename Data, typename Key>
-    ALWAYS_INLINE typename Data::iterator emplaceKey(Key key, Data & data, bool & inserted)
+    template <typename Data, bool consecutive_keys_optimization_>
+    struct LastElementCache
     {
+        static constexpr bool consecutive_keys_optimization = consecutive_keys_optimization_;
+        using Value = typename HashTableTraits<Data>::Value;
+        Value value;
+        bool empty = true;
+        bool found = false;
+
+        auto getMapped() const { return HashTableTraits<Data>::getMapped(value); }
+        auto & getKey() const { return HashTableTraits<Data>::getKey(value); }
+    };
+
+    template <typename Data>
+    struct LastElementCache<Data, false>
+    {
+        static constexpr bool consecutive_keys_optimization = false;
+    };
+
+    template <typename Data, typename Key, typename Cache>
+    ALWAYS_INLINE typename HashTableTraits<Data>::Value & emplaceKey(Key key, Data & data, bool & inserted, Cache & cache [[maybe_unused]])
+    {
+        if constexpr (Cache::consecutive_keys_optimization)
+        {
+            if (!cache.empty && cache.found && cache.getKey() == key)
+            {
+                inserted = false;
+                return cache.value;
+            }
+        }
+
         typename Data::iterator it;
         data.emplace(key, it, inserted);
-        return it;
+        auto & value = *it;
+
+        if constexpr (Cache::consecutive_keys_optimization)
+        {
+            cache.value = value;
+            cache.empty = false;
+            cache.found = true;
+        }
+
+        return value;
     }
 
-    template <typename Data, typename Key>
-    ALWAYS_INLINE typename HashTableTraits<Data>::Mapped findKey(Key key, Data & data, bool & found)
+    template <typename Data, typename Key, typename Cache>
+    ALWAYS_INLINE typename HashTableTraits<Data>::Mapped findKey(Key key, Data & data, bool & found, Cache & cache [[maybe_unused]])
     {
+        if constexpr (Cache::consecutive_keys_optimization)
+        {
+            if (!cache.empty && cache.getMapped() == key)
+            {
+                found = cache.found;
+                return cache.getMapped();
+            }
+        }
+
         auto it = data.find(key);
 
         found = it != data.end();
-        if (!found)
-            return nullptr;
+        auto mapped = found ? HashTableTraits<Data>::getMapped(*it)
+                           : nullptr;
 
-        return HashTableTraits<Data>::getMapped(*it);
+        if constexpr (Cache::consecutive_keys_optimization)
+        {
+            if (found)
+                cache.getKey() = key;
+            else
+                cache.value = *it;
+
+            cache.empty = false;
+            cache.found = found;
+        }
+
+        return mapped;
     }
 }
 
 /// For the case where there is one numeric key.
-template <typename FieldType>    /// UInt8/16/32/64 for any type with corresponding bit width.
+template <typename TData, typename FieldType>    /// UInt8/16/32/64 for any type with corresponding bit width.
 struct HashMethodOneNumber
 {
     const char * vec;
+    LastElementCache<TData, true> last_elem_cache;
 
     /// If the keys of a fixed length then key_sizes contains their lengths, empty otherwise.
     HashMethodOneNumber(ColumnRawPtrs & key_columns, const Sizes & /*key_sizes*/, const HashMethodContextPtr &)
@@ -100,14 +159,14 @@ struct HashMethodOneNumber
         bool & inserted,
         Arena & /*pool*/) /// For Serialized method, key may be placed in pool.
     {
-        return HashTableTraits<Data>::getMapped(*emplaceKey(getKey(row), data, inserted));
+        return HashTableTraits<Data>::getMapped(emplaceKey(getKey(row), data, inserted, last_elem_cache));
     }
 
     /// Find key into HashTable or HashMap. If Data is HashMap and key was found, returns ptr to value, otherwise nullptr.
     template <typename Data>
     ALWAYS_INLINE typename HashTableTraits<Data>::Mapped findKey(Data & data, size_t row, bool & found, Arena & /*pool*/)
     {
-        return findKey(getKey(row), data, found);
+        return findKey(getKey(row), data, found, last_elem_cache);
     }
 
     /// Insert the key from the hash table into columns.
@@ -115,6 +174,13 @@ struct HashMethodOneNumber
     static void insertKeyIntoColumns(const Value & value, MutableColumns & key_columns, const Sizes & /*key_sizes*/)
     {
         static_cast<ColumnVectorHelper *>(key_columns[0].get())->insertRawData<sizeof(FieldType)>(reinterpret_cast<const char *>(&value.first));
+    }
+
+    /// Get hash value of row.
+    template <typename Data>
+    ALWAYS_INLINE size_t getHash(const Data & data, size_t row, Arena & /*pool*/)
+    {
+        return data.hash(getKey(row));
     }
 
 protected:
@@ -131,10 +197,13 @@ protected:
 
 
 /// For the case where there is one string key.
+template <typename TData>
 struct HashMethodString
 {
     const IColumn::Offset * offsets;
     const UInt8 * chars;
+
+    LastElementCache<TData, true> last_elem_cache;
 
     HashMethodString(ColumnRawPtrs & key_columns, const Sizes & /*key_sizes*/, const HashMethodContextPtr &)
     {
@@ -151,27 +220,33 @@ struct HashMethodString
     template <typename Data>
     ALWAYS_INLINE typename HashTableTraits<Data>::Mapped emplaceKey(Data & data, size_t row, bool & inserted, Arena & pool)
     {
-        auto it = emplaceKey(getKey(row), data, inserted);
+        auto & value = emplaceKey(getKey(row), data, inserted, last_elem_cache);
         if (inserted)
         {
             using Cell = typename Data::Cell;
-            auto & key = Cell::getKey(*it);
+            auto & key = Cell::getKey(value);
             if (key.size)
                 key.data = pool.insert(key.data, key.size);
         }
-        return HashTableTraits<Data>::getMapped(*it);
+        return HashTableTraits<Data>::getMapped(value);
     }
 
     template <typename Data>
     ALWAYS_INLINE typename HashTableTraits<Data>::Mapped findKey(Data & data, size_t row, bool & found, Arena & /*pool*/)
     {
-        return findKey(getKey(row), data, found);
+        return findKey(getKey(row), data, found, last_elem_cache);
     }
 
     template <typename Value>
     static void insertKeyIntoColumns(const Value & value, MutableColumns & key_columns, const Sizes & /*key_sizes*/)
     {
         key_columns[0]->insertData(value.first.data, value.first.size);
+    }
+
+    template <typename Data>
+    ALWAYS_INLINE size_t getHash(const Data & data, size_t row, Arena & /*pool*/)
+    {
+        return data.hash(getKey(row));
     }
 
 protected:
@@ -191,10 +266,13 @@ protected:
 
 
 /// For the case where there is one fixed-length string key.
+template <typename TData>
 struct HashMethodFixedString
 {
     size_t n;
     const ColumnFixedString::Chars * chars;
+
+    LastElementCache<TData, true> last_elem_cache;
 
     HashMethodFixedString(ColumnRawPtrs & key_columns, const Sizes & /*key_sizes*/, const HashMethodContextPtr &)
     {
@@ -211,26 +289,32 @@ struct HashMethodFixedString
     template <typename Data>
     ALWAYS_INLINE typename HashTableTraits<Data>::Mapped emplaceKey(Data & data, size_t row, bool & inserted, Arena & pool)
     {
-        auto it = emplaceKey(getKey(row), data, inserted);
+        auto & value = emplaceKey(getKey(row), data, inserted, last_elem_cache);
         if (inserted)
         {
             using Cell = typename Data::Cell;
-            auto & key = Cell::getKey(*it);
+            auto & key = Cell::getKey(value);
             key.data = pool.insert(key.data, key.size);
         }
-        return HashTableTraits<Data>::getMapped(*it);
+        return HashTableTraits<Data>::getMapped(value);
     }
 
     template <typename Data>
     ALWAYS_INLINE typename HashTableTraits<Data>::Mapped findKey(Data & data, size_t row, bool & found, Arena & /*pool*/)
     {
-        return findKey(getKey(row), data, found);
+        return findKey(getKey(row), data, found, last_elem_cache);
     }
 
     template <typename Value>
     static void insertKeyIntoColumns(const Value & value, MutableColumns & key_columns, const Sizes & /*key_sizes*/)
     {
         key_columns[0]->insertData(value.first.data, value.first.size);
+    }
+
+    template <typename Data>
+    ALWAYS_INLINE size_t getHash(const Data & data, size_t row, Arena & /*pool*/)
+    {
+        return data.hash(getKey(row));
     }
 
 protected:
@@ -498,6 +582,16 @@ struct HashMethodSingleLowCardinalityColumn : public SingleColumnMethod
         return typename HashTableTraits<Data>::getMapped(*it);
     }
 
+    template <typename Data>
+    ALWAYS_INLINE size_t getHash(const Data & data, size_t row, Arena & pool)
+    {
+        row = getIndexAt(row);
+        if (saved_hash)
+            return saved_hash[row];
+
+        return Base::getHash(data, row, pool);
+    }
+
     template <typename Value>
     static void insertKeyIntoColumns(const Value & value, MutableColumns & key_columns_low_cardinality, const Sizes & /*key_sizes*/)
     {
@@ -612,9 +706,10 @@ template <>
 struct LowCardinalityKeys<false> {};
 
 /// For the case where all keys are of fixed length, and they fit in N (for example, 128) bits.
-template <typename Key, bool has_nullable_keys_ = false, bool has_low_cardinality_ = false>
-struct HashMethodKeysFixed : private columns_hashing_impl::BaseStateKeysFixed<Key, has_nullable_keys_>
+template <typename TData, bool has_nullable_keys_ = false, bool has_low_cardinality_ = false>
+struct HashMethodKeysFixed : private columns_hashing_impl::BaseStateKeysFixed<typename TData::key_type, has_nullable_keys_>
 {
+    using Key = typename TData::key_type;
 
     static constexpr bool has_nullable_keys = has_nullable_keys_;
     static constexpr bool has_low_cardinality = has_low_cardinality_;
@@ -622,6 +717,8 @@ struct HashMethodKeysFixed : private columns_hashing_impl::BaseStateKeysFixed<Ke
     LowCardinalityKeys<has_low_cardinality> low_cardinality_keys;
     Sizes key_sizes;
     size_t keys_size;
+
+    LastElementCache<TData, true> last_elem_cache;
 
     using Base = columns_hashing_impl::BaseStateKeysFixed<Key, has_nullable_keys>;
 
@@ -671,20 +768,13 @@ struct HashMethodKeysFixed : private columns_hashing_impl::BaseStateKeysFixed<Ke
     template <typename Data>
     ALWAYS_INLINE typename HashTableTraits<Data>::Mapped emplaceKey(Data & data, size_t row, bool & inserted, Arena & /*pool*/)
     {
-        auto it = emplaceKey(getKey(row), data, inserted);
-        return HashTableTraits<Data>::getMapped(*it);
+        return HashTableTraits<Data>::getMapped(emplaceKey(getKey(row), data, inserted, last_elem_cache));
     }
 
     template <typename Data>
     ALWAYS_INLINE typename HashTableTraits<Data>::Mapped findKey(Data & data, size_t row, bool & found, Arena & /*pool*/)
     {
-        auto it = data.find(getKey(row));
-
-        found = it != data.end();
-        if (!found)
-            return nullptr;
-
-        return HashTableTraits<Data>::getMapped(*it);
+        return findKey(getKey(row), data, found, last_elem_cache);
     }
 
     template <typename Value>
@@ -693,56 +783,10 @@ struct HashMethodKeysFixed : private columns_hashing_impl::BaseStateKeysFixed<Ke
         return StringRef(value.first.data, value.first.size);
     }
 
-    template <typename Value>
-    static void insertKeyIntoColumns(const Value & value, MutableColumns & key_columns, const Sizes & key_sizes)
+    template <typename Data>
+    ALWAYS_INLINE size_t getHash(const Data & data, size_t row, Arena & /*pool*/)
     {
-        size_t keys_size = key_columns.size();
-
-        static constexpr auto bitmap_size = has_nullable_keys ? std::tuple_size<KeysNullMap<Key>>::value : 0;
-        /// In any hash key value, column values to be read start just after the bitmap, if it exists.
-        size_t pos = bitmap_size;
-
-        for (size_t i = 0; i < keys_size; ++i)
-        {
-            IColumn * observed_column;
-            ColumnUInt8 * null_map;
-
-            /// If we have a nullable column, get its nested column and its null map.
-            if (has_nullable_keys && key_columns[i]->isColumnNullable())
-            {
-                ColumnNullable & nullable_col = static_cast<ColumnNullable &>(*key_columns[i]);
-                observed_column = &nullable_col.getNestedColumn();
-                null_map = static_cast<ColumnUInt8 *>(&nullable_col.getNullMapColumn());
-            }
-            else
-            {
-                observed_column = key_columns[i].get();
-                null_map = nullptr;
-            }
-
-            bool is_null;
-            if (has_nullable_keys && key_columns[i]->isColumnNullable())
-            {
-                /// The current column is nullable. Check if the value of the
-                /// corresponding key is nullable. Update the null map accordingly.
-                size_t bucket = i / 8;
-                size_t offset = i % 8;
-                UInt8 val = (reinterpret_cast<const UInt8 *>(&value.first)[bucket] >> offset) & 1;
-                null_map->insertValue(val);
-                is_null = val == 1;
-            }
-            else
-                is_null = false;
-
-            if (has_nullable_keys && is_null)
-                observed_column->insertDefault();
-            else
-            {
-                size_t size = key_sizes[i];
-                observed_column->insertData(reinterpret_cast<const char *>(&value.first) + pos, size);
-                pos += size;
-            }
-        }
+        return data.hash(getKey(row));
     }
 };
 
@@ -751,56 +795,53 @@ struct HashMethodKeysFixed : private columns_hashing_impl::BaseStateKeysFixed<Ke
   * That is, for example, for strings, it contains first the serialized length of the string, and then the bytes.
   * Therefore, when aggregating by several strings, there is no ambiguity.
   */
+template <typename TData>
 struct HashMethodSerialized
 {
     ColumnRawPtrs key_columns;
     size_t keys_size;
+    LastElementCache<TData, false> last_elem_cache;
 
     HashMethodSerialized(ColumnRawPtrs & key_columns, const Sizes & /*key_sizes*/, const HashMethodContextPtr &)
         : key_columns(key_columns), keys_size(key_columns.size()) {}
 
     static HashMethodContextPtr createContext(const HashMethodContext::Settings &) { return nullptr; }
 
-    ALWAYS_INLINE StringRef getKey(size_t row, Arena & pool) const
-    {
-        return serializeKeysToPoolContiguous(row, keys_size, key_columns, pool);
-    }
-
     template <typename Data>
     ALWAYS_INLINE typename HashTableTraits<Data>::Mapped emplaceKey(Data & data, size_t row, bool & inserted, Arena & pool)
     {
-        auto it = emplaceKey(getKey(row, pool), data, inserted);
+        auto key = getKey(row, pool);
+        auto & value = emplaceKey(key, data, inserted, last_elem_cache);
         if (!inserted)
-        {
-            using Cell = typename Data::Cell;
-            auto & key = Cell::getKey(*it);
             pool.rollback(key.size);
-        }
-        return HashTableTraits<Data>::getMapped(*it);
+
+        return HashTableTraits<Data>::getMapped(value);
     }
 
     template <typename Data>
     ALWAYS_INLINE typename HashTableTraits<Data>::Mapped findKey(Data & data, size_t row, bool & found, Arena & pool)
     {
-        auto it = data.find(getKey(row, pool));
-
-        using Cell = typename Data::Cell;
-        auto & key = Cell::getKey(*it);
+        auto key = getKey(row, pool);
+        auto mapped = findKey(key, data, found, last_elem_cache);
         pool.rollback(key.size);
 
-        found = it != data.end();
-        if (!found)
-            return nullptr;
-
-        return HashTableTraits<Data>::getMapped(*it);
+        return mapped;
     }
 
-    template <typename Value>
-    static void insertKeyIntoColumns(const Value & value, MutableColumns & key_columns, const Sizes &)
+    template <typename Data>
+    ALWAYS_INLINE size_t getHash(const Data & data, size_t row, Arena & pool)
     {
-        auto pos = value.first.data;
-        for (auto & column : key_columns)
-            pos = column->deserializeAndInsertFromArena(pos);
+        auto key = getKey(row, pool);
+        auto hash = data.hash(key);
+        pool.rollback(key.size);
+
+        return hash;
+    }
+
+protected:
+    ALWAYS_INLINE StringRef getKey(size_t row, Arena & pool) const
+    {
+        return serializeKeysToPoolContiguous(row, keys_size, key_columns, pool);
     }
 };
 

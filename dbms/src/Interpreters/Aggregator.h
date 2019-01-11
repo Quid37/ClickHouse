@@ -158,16 +158,12 @@ struct AggregationMethodOneNumber
     AggregationMethodOneNumber(const Other & other) : data(other.data) {}
 
     /// To use one `Method` in different threads, use different `State`.
-    using State = HashMethodOneNumber<FieldType>;
+    using State = HashMethodOneNumber<Data, FieldType>;
 
-    /** Do not use optimization for consecutive keys.
-      */
-    static const bool no_consecutive_keys_optimization = false;
     /// Use optimization for low cardinality.
     static const bool low_cardinality_optimization = false;
 
-    /** Insert the key from the hash table into columns.
-      */
+    // Insert the key from the hash table into columns.
     static void insertKeyIntoColumns(const typename Data::value_type & value, MutableColumns & key_columns, const Sizes & /*key_sizes*/)
     {
         static_cast<ColumnVectorHelper *>(key_columns[0].get())->insertRawData<sizeof(FieldType)>(reinterpret_cast<const char *>(&value.first));
@@ -192,9 +188,8 @@ struct AggregationMethodString
     template <typename Other>
     AggregationMethodString(const Other & other) : data(other.data) {}
 
-    using State = HashMethodString;
+    using State = HashMethodString<Data>;
 
-    static const bool no_consecutive_keys_optimization = false;
     static const bool low_cardinality_optimization = false;
 
     static void insertKeyIntoColumns(const typename Data::value_type & value, MutableColumns & key_columns, const Sizes &)
@@ -221,9 +216,8 @@ struct AggregationMethodFixedString
     template <typename Other>
     AggregationMethodFixedString(const Other & other) : data(other.data) {}
 
-    using State = HashMethodFixedString;
+    using State = HashMethodFixedString<Data>;
 
-    static const bool no_consecutive_keys_optimization = false;
     static const bool low_cardinality_optimization = false;
 
     static void insertKeyIntoColumns(const typename Data::value_type & value, MutableColumns & key_columns, const Sizes &)
@@ -254,7 +248,6 @@ struct AggregationMethodSingleLowCardinalityColumn : public SingleColumnMethod
 
     using State = HashMethodSingleLowCardinalityColumn<BaseState, true>;
 
-    static const bool no_consecutive_keys_optimization = true;
     static const bool low_cardinality_optimization = true;
 
     static void insertKeyIntoColumns(const typename Data::value_type & value, MutableColumns & key_columns_low_cardinality, const Sizes & /*key_sizes*/)
@@ -284,9 +277,8 @@ struct AggregationMethodKeysFixed
     template <typename Other>
     AggregationMethodKeysFixed(const Other & other) : data(other.data) {}
 
-    using State = HashMethodKeysFixed<Key, has_nullable_keys_, has_low_cardinality_>;
+    using State = HashMethodKeysFixed<Data, has_nullable_keys, has_low_cardinality>;
 
-    static const bool no_consecutive_keys_optimization = false;
     static const bool low_cardinality_optimization = false;
 
     static void insertKeyIntoColumns(const typename Data::value_type & value, MutableColumns & key_columns, const Sizes & key_sizes)
@@ -363,17 +355,15 @@ struct AggregationMethodSerialized
     template <typename Other>
     AggregationMethodSerialized(const Other & other) : data(other.data) {}
 
-    using State = HashMethodSerialized;
+    using State = HashMethodSerialized<Data>;
 
-    /// If the key already was, it is removed from the pool (overwritten), and the next key can not be compared with it.
-    static const bool no_consecutive_keys_optimization = true;
     static const bool low_cardinality_optimization = false;
 
     static void insertKeyIntoColumns(const typename Data::value_type & value, MutableColumns & key_columns, const Sizes &)
     {
         auto pos = value.first.data;
-        for (size_t i = 0; i < key_columns.size(); ++i)
-            pos = key_columns[i]->deserializeAndInsertFromArena(pos);
+        for (auto & column : key_columns)
+            pos = column->deserializeAndInsertFromArena(pos);
     }
 };
 
@@ -712,7 +702,7 @@ struct AggregatedDataVariants : private boost::noncopyable
             { \
                 using TPtr ## NAME = decltype(AggregatedDataVariants::NAME); \
                 using T ## NAME = typename TPtr ## NAME ::element_type; \
-                return T ## NAME ::createCache(settings); \
+                return T ## NAME ::State::createCache(settings); \
             }
 
             APPLY_FOR_AGGREGATED_VARIANTS(M)
@@ -899,7 +889,7 @@ protected:
     AggregatedDataVariants::Type method_chosen;
     Sizes key_sizes;
 
-    AggregationStateCachePtr aggregation_state_cache;
+    HashMethodContextPtr aggregation_state_cache;
 
     AggregateFunctionsPlainPtrs aggregate_functions;
 

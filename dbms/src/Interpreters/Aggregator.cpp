@@ -6,9 +6,11 @@
 #include <Common/setThreadName.h>
 #include <DataTypes/DataTypeAggregateFunction.h>
 #include <DataTypes/DataTypeNullable.h>
+#include <DataTypes/DataTypeLowCardinality.h>
 #include <Columns/ColumnsNumber.h>
 #include <Columns/ColumnArray.h>
 #include <Columns/ColumnTuple.h>
+#include <Columns/ColumnLowCardinality.h>
 #include <AggregateFunctions/AggregateFunctionCount.h>
 #include <DataStreams/IProfilingBlockInputStream.h>
 #include <DataStreams/NativeBlockOutputStream.h>
@@ -22,11 +24,9 @@
 #include <Common/CurrentThread.h>
 #include <Common/typeid_cast.h>
 #include <common/demangle.h>
+
 #if __has_include(<Interpreters/config_compile.h>)
 #include <Interpreters/config_compile.h>
-#include <Columns/ColumnLowCardinality.h>
-#include <DataTypes/DataTypeLowCardinality.h>
-
 #endif
 
 
@@ -620,7 +620,7 @@ void NO_INLINE Aggregator::executeImplCase(
             aggregate_data = state.emplaceKey(method.data, i, inserted, *aggregates_pool);
         else
             /// Add only if the key already exists.
-            aggregate_data = state.findKey(method.data, i);
+            aggregate_data = state.findKey(method.data, i, *aggregates_pool);
 
         /// aggregate_date == nullptr means that the new key did not fit in the hash table because of no_more_keys.
 
@@ -1538,7 +1538,7 @@ void NO_INLINE Aggregator::mergeDataNoMoreKeysImpl(
         for (size_t i = 0; i < params.aggregates_size; ++i)
             aggregate_functions[i]->merge(
                 res_data + offsets_of_aggregate_states[i],
-                Method::getAggregateData(it->second) + offsets_of_aggregate_states[i],
+                it->second + offsets_of_aggregate_states[i],
                 arena);
 
         for (size_t i = 0; i < params.aggregates_size; ++i)
@@ -1572,7 +1572,7 @@ void NO_INLINE Aggregator::mergeDataOnlyExistingKeysImpl(
         for (size_t i = 0; i < params.aggregates_size; ++i)
             aggregate_functions[i]->merge(
                 res_data + offsets_of_aggregate_states[i],
-                Method::getAggregateData(it->second) + offsets_of_aggregate_states[i],
+                it->second + offsets_of_aggregate_states[i],
                 arena);
 
         for (size_t i = 0; i < params.aggregates_size; ++i)
@@ -1929,7 +1929,7 @@ template <bool no_more_keys, typename Method, typename Table>
 void NO_INLINE Aggregator::mergeStreamsImplCase(
     Block & block,
     Arena * aggregates_pool,
-    Method & method,
+    Method & method [[maybe_unused]],
     Table & data,
     AggregateDataPtr overflow_row) const
 {
@@ -2305,7 +2305,7 @@ void NO_INLINE Aggregator::convertBlockToTwoLevelImpl(
     Method & method,
     Arena * pool,
     ColumnRawPtrs & key_columns,
-    StringRefs & keys,
+    StringRefs & keys [[maybe_unused]],
     const Block & source,
     std::vector<Block> & destinations) const
 {
@@ -2329,16 +2329,11 @@ void NO_INLINE Aggregator::convertBlockToTwoLevelImpl(
             }
         }
 
-        /// Obtain a key. Calculate bucket number from it.
-        typename Method::Key key = state.getKey(key_columns, params.keys_size, i, key_sizes, keys, *pool);
-
-        auto hash = method.data.hash(key);
+        /// Calculate bucket number from row hash.
+        auto hash = state.getHash(method.data, i, pool);
         auto bucket = method.data.getBucketFromHash(hash);
 
         selector[i] = bucket;
-
-        /// We don't need to store this key in pool.
-        state.onExistingKey(key, *pool);
     }
 
     size_t num_buckets = destinations.size();
@@ -2429,7 +2424,7 @@ void NO_INLINE Aggregator::destroyImpl(Table & table) const
 {
     for (auto elem : table)
     {
-        AggregateDataPtr & data = Method::getAggregateData(elem.second);
+        AggregateDataPtr & data = elem.second;
 
         /** If an exception (usually a lack of memory, the MemoryTracker throws) arose
           *  after inserting the key into a hash table, but before creating all states of aggregate functions,
