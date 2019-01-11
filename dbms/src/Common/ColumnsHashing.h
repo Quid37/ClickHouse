@@ -188,7 +188,6 @@ struct HashMethodOneNumber
         return data.hash(getKey(row));
     }
 
-protected:
     /// Get StringRef from value which can be inserted into column.
     template <typename Value>
     static StringRef getValueRef(const Value & value)
@@ -196,6 +195,7 @@ protected:
         return StringRef(reinterpret_cast<const char *>(&value.first), sizeof(value.first));
     }
 
+protected:
     template <typename Value>
     static ALWAYS_INLINE void onNewKey(Value & /*value*/, Arena & /*pool*/) {}
 };
@@ -253,13 +253,13 @@ struct HashMethodString
         return data.hash(getKey(row));
     }
 
-protected:
     template <typename Value>
     static StringRef getValueRef(const Value & value)
     {
         return StringRef(value.first.data, value.first.size);
     }
 
+protected:
     template <typename Value>
     static ALWAYS_INLINE void onNewKey(Value & value, Arena & pool)
     {
@@ -320,13 +320,13 @@ struct HashMethodFixedString
         return data.hash(getKey(row));
     }
 
-protected:
     template <typename Value>
     static StringRef getValueRef(const Value & value)
     {
         return StringRef(value.first.data, value.first.size);
     }
 
+protected:
     template <typename Value>
     static ALWAYS_INLINE void onNewKey(Value & value, Arena & pool)
     {
