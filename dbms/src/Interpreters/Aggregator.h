@@ -705,7 +705,7 @@ struct AggregatedDataVariants : private boost::noncopyable
             { \
                 using TPtr ## NAME = decltype(AggregatedDataVariants::NAME); \
                 using T ## NAME = typename TPtr ## NAME ::element_type; \
-                return T ## NAME ::State::createCache(settings); \
+                return T ## NAME ::State::createContext(settings); \
             }
 
             APPLY_FOR_AGGREGATED_VARIANTS(M)
