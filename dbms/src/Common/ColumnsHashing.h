@@ -44,7 +44,7 @@ template <typename First, typename Second>
 struct MappedTraits<PairNoInit<First, Second>>
 {
     using Type = Second *;
-    static Type & getMapped(PairNoInit<First, Second> & value) { return &value.second; }
+    static Type getMapped(PairNoInit<First, Second> & value) { return &value.second; }
     static First & getKey(PairNoInit<First, Second> & value) { return value.first; }
 };
 
@@ -54,7 +54,7 @@ struct HashTableTraits
     using Value = typename Data::value_type;
     using Mapped = typename MappedTraits<Value>::Type;
 
-    static Mapped & getMapped(Value & value) { return MappedTraits<Value>::getMapped(value); }
+    static Mapped getMapped(Value & value) { return MappedTraits<Value>::getMapped(value); }
     static auto & getKey(Value & value) { return MappedTraits<Value>::getKey(value); }
 };
 
@@ -67,7 +67,7 @@ struct LastElementCache
     bool empty = true;
     bool found = false;
 
-    auto & getMapped() { return HashTableTraits<Data>::getMapped(value); }
+    auto getMapped() { return HashTableTraits<Data>::getMapped(value); }
     auto & getKey() { return HashTableTraits<Data>::getKey(value); }
 };
 
@@ -199,7 +199,7 @@ struct HashMethodOneNumber
     template <typename Mapped>
     ALWAYS_INLINE void cacheData(size_t /*row*/, Mapped mapped)
     {
-        last_elem_cache.getMapped() = mapped;
+        *last_elem_cache.getMapped() = mapped;
     }
 
 protected:
@@ -269,7 +269,7 @@ struct HashMethodString
     template <typename Mapped>
     ALWAYS_INLINE void cacheData(size_t /*row*/, Mapped mapped)
     {
-        last_elem_cache.getMapped() = mapped;
+        *last_elem_cache.getMapped() = mapped;
     }
 
 protected:
@@ -342,7 +342,7 @@ struct HashMethodFixedString
     template <typename Mapped>
     ALWAYS_INLINE void cacheData(size_t /*row*/, Mapped mapped)
     {
-        last_elem_cache.getMapped() = mapped;
+        *last_elem_cache.getMapped() = mapped;
     }
 
 protected:
@@ -815,7 +815,7 @@ struct HashMethodKeysFixed : private columns_hashing_impl::BaseStateKeysFixed<ty
     template <typename Mapped>
     ALWAYS_INLINE void cacheData(size_t /*row*/, Mapped mapped)
     {
-        last_elem_cache.getMapped() = mapped;
+        *last_elem_cache.getMapped() = mapped;
     }
 };
 
