@@ -78,7 +78,8 @@ struct LastElementCache<Data, false>
 };
 
 template <typename Data, typename Key, typename Cache>
-ALWAYS_INLINE typename HashTableTraits<Data>::Value & emplaceKey(Key key, Data & data, bool & inserted, Cache & cache [[maybe_unused]])
+ALWAYS_INLINE typename HashTableTraits<Data>::Value & emplaceKeyImpl(
+    Key key, Data & data, bool & inserted, Cache & cache [[maybe_unused]])
 {
     if constexpr (Cache::consecutive_keys_optimization)
     {
@@ -104,7 +105,8 @@ ALWAYS_INLINE typename HashTableTraits<Data>::Value & emplaceKey(Key key, Data &
 }
 
 template <typename Data, typename Key, typename Cache>
-ALWAYS_INLINE typename HashTableTraits<Data>::Mapped findKey(Key key, Data & data, bool & found, Cache & cache [[maybe_unused]])
+ALWAYS_INLINE typename HashTableTraits<Data>::Mapped findKeyImpl(
+    Key key, Data & data, bool & found, Cache & cache [[maybe_unused]])
 {
     if constexpr (Cache::consecutive_keys_optimization)
     {
@@ -162,14 +164,14 @@ struct HashMethodOneNumber
         bool & inserted,
         Arena & /*pool*/) /// For Serialized method, key may be placed in pool.
     {
-        return HashTableTraits<Data>::getMapped(emplaceKey(getKey(row), data, inserted, last_elem_cache));
+        return HashTableTraits<Data>::getMapped(emplaceKeyImpl(getKey(row), data, inserted, last_elem_cache));
     }
 
     /// Find key into HashTable or HashMap. If Data is HashMap and key was found, returns ptr to value, otherwise nullptr.
     template <typename Data>
     ALWAYS_INLINE typename HashTableTraits<Data>::Mapped findKey(Data & data, size_t row, bool & found, Arena & /*pool*/)
     {
-        return findKey(getKey(row), data, found, last_elem_cache);
+        return findKeyImpl(getKey(row), data, found, last_elem_cache);
     }
 
     /// Insert the key from the hash table into columns.
@@ -223,7 +225,7 @@ struct HashMethodString
     template <typename Data>
     ALWAYS_INLINE typename HashTableTraits<Data>::Mapped emplaceKey(Data & data, size_t row, bool & inserted, Arena & pool)
     {
-        auto & value = emplaceKey(getKey(row), data, inserted, last_elem_cache);
+        auto & value = emplaceKeyImpl(getKey(row), data, inserted, last_elem_cache);
         if (inserted)
         {
             using Cell = typename Data::Cell;
@@ -237,7 +239,7 @@ struct HashMethodString
     template <typename Data>
     ALWAYS_INLINE typename HashTableTraits<Data>::Mapped findKey(Data & data, size_t row, bool & found, Arena & /*pool*/)
     {
-        return findKey(getKey(row), data, found, last_elem_cache);
+        return findKeyImpl(getKey(row), data, found, last_elem_cache);
     }
 
     template <typename Value>
@@ -292,7 +294,7 @@ struct HashMethodFixedString
     template <typename Data>
     ALWAYS_INLINE typename HashTableTraits<Data>::Mapped emplaceKey(Data & data, size_t row, bool & inserted, Arena & pool)
     {
-        auto & value = emplaceKey(getKey(row), data, inserted, last_elem_cache);
+        auto & value = emplaceKeyImpl(getKey(row), data, inserted, last_elem_cache);
         if (inserted)
         {
             using Cell = typename Data::Cell;
@@ -305,7 +307,7 @@ struct HashMethodFixedString
     template <typename Data>
     ALWAYS_INLINE typename HashTableTraits<Data>::Mapped findKey(Data & data, size_t row, bool & found, Arena & /*pool*/)
     {
-        return findKey(getKey(row), data, found, last_elem_cache);
+        return findKeyImpl(getKey(row), data, found, last_elem_cache);
     }
 
     template <typename Value>
@@ -771,13 +773,13 @@ struct HashMethodKeysFixed : private columns_hashing_impl::BaseStateKeysFixed<ty
     template <typename Data>
     ALWAYS_INLINE typename HashTableTraits<Data>::Mapped emplaceKey(Data & data, size_t row, bool & inserted, Arena & /*pool*/)
     {
-        return HashTableTraits<Data>::getMapped(emplaceKey(getKey(row), data, inserted, last_elem_cache));
+        return HashTableTraits<Data>::getMapped(emplaceKeyImpl(getKey(row), data, inserted, last_elem_cache));
     }
 
     template <typename Data>
     ALWAYS_INLINE typename HashTableTraits<Data>::Mapped findKey(Data & data, size_t row, bool & found, Arena & /*pool*/)
     {
-        return findKey(getKey(row), data, found, last_elem_cache);
+        return findKeyImpl(getKey(row), data, found, last_elem_cache);
     }
 
     template <typename Value>
@@ -814,7 +816,7 @@ struct HashMethodSerialized
     ALWAYS_INLINE typename HashTableTraits<Data>::Mapped emplaceKey(Data & data, size_t row, bool & inserted, Arena & pool)
     {
         auto key = getKey(row, pool);
-        auto & value = emplaceKey(key, data, inserted, last_elem_cache);
+        auto & value = emplaceKeyImpl(key, data, inserted, last_elem_cache);
         if (!inserted)
             pool.rollback(key.size);
 
@@ -825,7 +827,7 @@ struct HashMethodSerialized
     ALWAYS_INLINE typename HashTableTraits<Data>::Mapped findKey(Data & data, size_t row, bool & found, Arena & pool)
     {
         auto key = getKey(row, pool);
-        auto mapped = findKey(key, data, found, last_elem_cache);
+        auto mapped = findKeyImpl(key, data, found, last_elem_cache);
         pool.rollback(key.size);
 
         return mapped;
