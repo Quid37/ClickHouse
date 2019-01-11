@@ -113,7 +113,7 @@ inline ALWAYS_INLINE typename HashTableTraits<Data>::Mapped findKeyImpl(
         if (!cache.empty && cache.getKey() == key)
         {
             found = cache.found;
-            return cache.getMapped();
+            return found ? cache.getMapped() : nullptr;
         }
     }
 
@@ -121,7 +121,7 @@ inline ALWAYS_INLINE typename HashTableTraits<Data>::Mapped findKeyImpl(
 
     found = it != data.end();
     auto mapped = found ? HashTableTraits<Data>::getMapped(*it)
-                       : nullptr;
+                        : nullptr;
 
     if constexpr (Cache::consecutive_keys_optimization)
     {
