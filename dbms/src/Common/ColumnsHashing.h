@@ -78,7 +78,7 @@ struct LastElementCache<Data, false>
 };
 
 template <typename Data, typename Key, typename Cache>
-ALWAYS_INLINE typename HashTableTraits<Data>::Value & emplaceKeyImpl(
+inline ALWAYS_INLINE typename HashTableTraits<Data>::Value & emplaceKeyImpl(
     Key key, Data & data, bool & inserted, Cache & cache [[maybe_unused]])
 {
     if constexpr (Cache::consecutive_keys_optimization)
@@ -105,7 +105,7 @@ ALWAYS_INLINE typename HashTableTraits<Data>::Value & emplaceKeyImpl(
 }
 
 template <typename Data, typename Key, typename Cache>
-ALWAYS_INLINE typename HashTableTraits<Data>::Mapped findKeyImpl(
+inline ALWAYS_INLINE typename HashTableTraits<Data>::Mapped findKeyImpl(
     Key key, Data & data, bool & found, Cache & cache [[maybe_unused]])
 {
     if constexpr (Cache::consecutive_keys_optimization)
