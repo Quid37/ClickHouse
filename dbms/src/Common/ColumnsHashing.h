@@ -67,8 +67,8 @@ struct LastElementCache
     bool empty = true;
     bool found = false;
 
-    auto getMapped() const { return HashTableTraits<Data>::getMapped(value); }
-    auto & getKey() const { return HashTableTraits<Data>::getKey(value); }
+    auto getMapped() { return HashTableTraits<Data>::getMapped(value); }
+    auto & getKey() { return HashTableTraits<Data>::getKey(value); }
 };
 
 template <typename Data>
