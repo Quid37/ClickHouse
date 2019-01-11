@@ -536,7 +536,7 @@ struct HashMethodSingleLowCardinalityColumn : public SingleColumnMethod
         else if constexpr (use_cache)
             aggregate_data_cache[row] = it->second;
 
-        return typename HashTableTraits<Data>::getMapped(*it);
+        return HashTableTraits<Data>::getMapped(*it);
     }
 
     ALWAYS_INLINE bool isNullAt(size_t i)

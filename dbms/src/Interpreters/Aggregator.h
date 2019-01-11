@@ -252,7 +252,7 @@ struct AggregationMethodSingleLowCardinalityColumn : public SingleColumnMethod
 
     static void insertKeyIntoColumns(const typename Data::value_type & value, MutableColumns & key_columns_low_cardinality, const Sizes & /*key_sizes*/)
     {
-        auto ref = Base::getValueRef(value);
+        auto ref = BaseState::getValueRef(value);
         static_cast<ColumnLowCardinality *>(key_columns_low_cardinality[0].get())->insertData(ref.data, ref.size);
     }
 };
