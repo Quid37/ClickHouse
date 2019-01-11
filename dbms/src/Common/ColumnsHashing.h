@@ -144,7 +144,7 @@ struct HashMethodOneNumber
     LastElementCache<TData, true> last_elem_cache;
 
     /// If the keys of a fixed length then key_sizes contains their lengths, empty otherwise.
-    HashMethodOneNumber(ColumnRawPtrs & key_columns, const Sizes & /*key_sizes*/, const HashMethodContextPtr &)
+    HashMethodOneNumber(const ColumnRawPtrs & key_columns, const Sizes & /*key_sizes*/, const HashMethodContextPtr &)
     {
         vec = key_columns[0]->getRawData().data;
     }
@@ -208,7 +208,7 @@ struct HashMethodString
 
     LastElementCache<TData, true> last_elem_cache;
 
-    HashMethodString(ColumnRawPtrs & key_columns, const Sizes & /*key_sizes*/, const HashMethodContextPtr &)
+    HashMethodString(const ColumnRawPtrs & key_columns, const Sizes & /*key_sizes*/, const HashMethodContextPtr &)
     {
         const IColumn & column = *key_columns[0];
         const ColumnString & column_string = static_cast<const ColumnString &>(column);
@@ -277,7 +277,7 @@ struct HashMethodFixedString
 
     LastElementCache<TData, true> last_elem_cache;
 
-    HashMethodFixedString(ColumnRawPtrs & key_columns, const Sizes & /*key_sizes*/, const HashMethodContextPtr &)
+    HashMethodFixedString(const ColumnRawPtrs & key_columns, const Sizes & /*key_sizes*/, const HashMethodContextPtr &)
     {
         const IColumn & column = *key_columns[0];
         const ColumnFixedString & column_string = static_cast<const ColumnFixedString &>(column);
@@ -417,7 +417,7 @@ struct HashMethodSingleLowCardinalityColumn : public SingleColumnMethod
     }
 
     HashMethodSingleLowCardinalityColumn(
-        ColumnRawPtrs & key_columns_low_cardinality, const Sizes & key_sizes, const HashMethodContextPtr & context)
+        const ColumnRawPtrs & key_columns_low_cardinality, const Sizes & key_sizes, const HashMethodContextPtr & context)
         : Base({getLowCardinalityColumn(key_columns_low_cardinality[0]).getDictionary().getNestedNotNullableColumn().get()}, key_sizes, context)
     {
         auto column = &getLowCardinalityColumn(key_columns_low_cardinality[0]);
@@ -725,7 +725,7 @@ struct HashMethodKeysFixed : private columns_hashing_impl::BaseStateKeysFixed<ty
 
     using Base = columns_hashing_impl::BaseStateKeysFixed<Key, has_nullable_keys>;
 
-    HashMethodKeysFixed(ColumnRawPtrs & key_columns, const Sizes & key_sizes, const HashMethodContextPtr &)
+    HashMethodKeysFixed(const ColumnRawPtrs & key_columns, const Sizes & key_sizes, const HashMethodContextPtr &)
         : key_sizes(std::move(key_sizes)), keys_size(key_columns.size())
     {
         if constexpr (has_low_cardinality)
@@ -805,7 +805,7 @@ struct HashMethodSerialized
     size_t keys_size;
     LastElementCache<TData, false> last_elem_cache;
 
-    HashMethodSerialized(ColumnRawPtrs & key_columns, const Sizes & /*key_sizes*/, const HashMethodContextPtr &)
+    HashMethodSerialized(const ColumnRawPtrs & key_columns, const Sizes & /*key_sizes*/, const HashMethodContextPtr &)
         : key_columns(key_columns), keys_size(key_columns.size()) {}
 
     static HashMethodContextPtr createContext(const HashMethodContext::Settings &) { return nullptr; }
