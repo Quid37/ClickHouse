@@ -13,6 +13,9 @@
 namespace DB
 {
 
+namespace ColumnsHashing
+{
+
 /// Generic context for HashMethod. Context is shared between multiple threads, all methods must be thread-safe.
 /// Is used for caching.
 class HashMethodContext
@@ -28,111 +31,110 @@ public:
 
 using HashMethodContextPtr = std::shared_ptr<HashMethodContext>;
 
-namespace
+
+template <typename T>
+struct MappedTraits
 {
-    template <typename T>
-    struct MappedTraits
+    using Type = void *;
+    static Type getMapped(T &) { return nullptr; }
+    static T & getKey(T & key) { return key; }
+};
+
+template <typename First, typename Second>
+struct MappedTraits<PairNoInit<First, Second>>
+{
+    using Type = Second *;
+    static Type getMapped(PairNoInit<First, Second> & value) { return &value->second; }
+    static First & getKey(PairNoInit<First, Second> & value) { return value.first; }
+};
+
+template <typename Data>
+struct HashTableTraits
+{
+    using Value = typename Data::value_type;
+    using Mapped = typename MappedTraits<Value>::Type;
+
+    static Mapped getMapped(Value & value) { return MappedTraits<Value>::getMapped(value); }
+    static auto & getKey(Value & value) { return MappedTraits<Value>::getKey(value); }
+};
+
+template <typename Data, bool consecutive_keys_optimization_>
+struct LastElementCache
+{
+    static constexpr bool consecutive_keys_optimization = consecutive_keys_optimization_;
+    using Value = typename HashTableTraits<Data>::Value;
+    Value value;
+    bool empty = true;
+    bool found = false;
+
+    auto getMapped() const { return HashTableTraits<Data>::getMapped(value); }
+    auto & getKey() const { return HashTableTraits<Data>::getKey(value); }
+};
+
+template <typename Data>
+struct LastElementCache<Data, false>
+{
+    static constexpr bool consecutive_keys_optimization = false;
+};
+
+template <typename Data, typename Key, typename Cache>
+ALWAYS_INLINE typename HashTableTraits<Data>::Value & emplaceKey(Key key, Data & data, bool & inserted, Cache & cache [[maybe_unused]])
+{
+    if constexpr (Cache::consecutive_keys_optimization)
     {
-        using Type = void *;
-        static Type getMapped(T &) { return nullptr; }
-        static T & getKey(T & key) { return key; }
-    };
-
-    template <typename First, typename Second>
-    struct MappedTraits<PairNoInit<First, Second>>
-    {
-        using Type = Second *;
-        static Type getMapped(PairNoInit<First, Second> & value) { return &value->second; }
-        static First & getKey(PairNoInit<First, Second> & value) { return value.first; }
-    };
-
-    template <typename Data>
-    struct HashTableTraits
-    {
-        using Value = typename Data::value_type;
-        using Mapped = typename MappedTraits<Value>::Type;
-
-        static Mapped getMapped(Value & value) { return MappedTraits<Value>::getMapped(value); }
-        static auto & getKey(Value & value) { return MappedTraits<Value>::getKey(value); }
-    };
-
-    template <typename Data, bool consecutive_keys_optimization_>
-    struct LastElementCache
-    {
-        static constexpr bool consecutive_keys_optimization = consecutive_keys_optimization_;
-        using Value = typename HashTableTraits<Data>::Value;
-        Value value;
-        bool empty = true;
-        bool found = false;
-
-        auto getMapped() const { return HashTableTraits<Data>::getMapped(value); }
-        auto & getKey() const { return HashTableTraits<Data>::getKey(value); }
-    };
-
-    template <typename Data>
-    struct LastElementCache<Data, false>
-    {
-        static constexpr bool consecutive_keys_optimization = false;
-    };
-
-    template <typename Data, typename Key, typename Cache>
-    ALWAYS_INLINE typename HashTableTraits<Data>::Value & emplaceKey(Key key, Data & data, bool & inserted, Cache & cache [[maybe_unused]])
-    {
-        if constexpr (Cache::consecutive_keys_optimization)
+        if (!cache.empty && cache.found && cache.getKey() == key)
         {
-            if (!cache.empty && cache.found && cache.getKey() == key)
-            {
-                inserted = false;
-                return cache.value;
-            }
+            inserted = false;
+            return cache.value;
         }
-
-        typename Data::iterator it;
-        data.emplace(key, it, inserted);
-        auto & value = *it;
-
-        if constexpr (Cache::consecutive_keys_optimization)
-        {
-            cache.value = value;
-            cache.empty = false;
-            cache.found = true;
-        }
-
-        return value;
     }
 
-    template <typename Data, typename Key, typename Cache>
-    ALWAYS_INLINE typename HashTableTraits<Data>::Mapped findKey(Key key, Data & data, bool & found, Cache & cache [[maybe_unused]])
+    typename Data::iterator it;
+    data.emplace(key, it, inserted);
+    auto & value = *it;
+
+    if constexpr (Cache::consecutive_keys_optimization)
     {
-        if constexpr (Cache::consecutive_keys_optimization)
-        {
-            if (!cache.empty && cache.getMapped() == key)
-            {
-                found = cache.found;
-                return cache.getMapped();
-            }
-        }
-
-        auto it = data.find(key);
-
-        found = it != data.end();
-        auto mapped = found ? HashTableTraits<Data>::getMapped(*it)
-                           : nullptr;
-
-        if constexpr (Cache::consecutive_keys_optimization)
-        {
-            if (found)
-                cache.getKey() = key;
-            else
-                cache.value = *it;
-
-            cache.empty = false;
-            cache.found = found;
-        }
-
-        return mapped;
+        cache.value = value;
+        cache.empty = false;
+        cache.found = true;
     }
+
+    return value;
 }
+
+template <typename Data, typename Key, typename Cache>
+ALWAYS_INLINE typename HashTableTraits<Data>::Mapped findKey(Key key, Data & data, bool & found, Cache & cache [[maybe_unused]])
+{
+    if constexpr (Cache::consecutive_keys_optimization)
+    {
+        if (!cache.empty && cache.getMapped() == key)
+        {
+            found = cache.found;
+            return cache.getMapped();
+        }
+    }
+
+    auto it = data.find(key);
+
+    found = it != data.end();
+    auto mapped = found ? HashTableTraits<Data>::getMapped(*it)
+                       : nullptr;
+
+    if constexpr (Cache::consecutive_keys_optimization)
+    {
+        if (found)
+            cache.getKey() = key;
+        else
+            cache.value = *it;
+
+        cache.empty = false;
+        cache.found = found;
+    }
+
+    return mapped;
+}
+
 
 /// For the case where there is one numeric key.
 template <typename TData, typename FieldType>    /// UInt8/16/32/64 for any type with corresponding bit width.
@@ -846,5 +848,5 @@ protected:
     }
 };
 
-
+}
 }
