@@ -44,7 +44,7 @@ template <typename First, typename Second>
 struct MappedTraits<PairNoInit<First, Second>>
 {
     using Type = Second *;
-    static Type getMapped(PairNoInit<First, Second> & value) { return &value->second; }
+    static Type getMapped(PairNoInit<First, Second> & value) { return &value.second; }
     static First & getKey(PairNoInit<First, Second> & value) { return value.first; }
 };
 
