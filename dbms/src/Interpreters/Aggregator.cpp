@@ -619,8 +619,11 @@ void NO_INLINE Aggregator::executeImplCase(
         if constexpr (!no_more_keys)  /// Insert.
             aggregate_data = state.emplaceKey(method.data, i, inserted, *aggregates_pool);
         else
+        {
             /// Add only if the key already exists.
-            aggregate_data = state.findKey(method.data, i, *aggregates_pool);
+            bool found;
+            aggregate_data = state.findKey(method.data, i, found, *aggregates_pool);
+        }
 
         /// aggregate_date == nullptr means that the new key did not fit in the hash table because of no_more_keys.
 
@@ -1957,15 +1960,16 @@ void NO_INLINE Aggregator::mergeStreamsImplCase(
         if (!no_more_keys)
             aggregate_data = state.emplaceKey(data, i, inserted, *aggregates_pool);
         else
-            aggregate_data = state.findRow(data, i, *aggregates_pool);
-
+        {
+            bool found;
+            aggregate_data = state.findKey(data, i, found, *aggregates_pool);
+        }
 
         /// aggregate_date == nullptr means that the new key did not fit in the hash table because of no_more_keys.
 
         /// If the key does not fit, and the data does not need to be aggregated into a separate row, then there's nothing to do.
         if (!aggregate_data && !overflow_row)
             continue;
-
 
         /// If a new key is inserted, initialize the states of the aggregate functions, and possibly something related to the key.
         if (inserted)
@@ -2075,7 +2079,7 @@ void Aggregator::mergeStream(const BlockInputStreamPtr & stream, AggregatedDataV
       * If there is at least one block with a bucket number greater or equal than zero, then there was a two-level aggregation.
       */
     auto max_bucket = bucket_to_blocks.rbegin()->first;
-    size_t has_two_level = max_bucket >= 0;
+    bool has_two_level = max_bucket >= 0;
 
     if (has_two_level)
     {
@@ -2330,7 +2334,7 @@ void NO_INLINE Aggregator::convertBlockToTwoLevelImpl(
         }
 
         /// Calculate bucket number from row hash.
-        auto hash = state.getHash(method.data, i, pool);
+        auto hash = state.getHash(method.data, i, *pool);
         auto bucket = method.data.getBucketFromHash(hash);
 
         selector[i] = bucket;
