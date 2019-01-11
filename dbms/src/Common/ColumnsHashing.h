@@ -35,6 +35,7 @@ namespace
     {
         using Type = void *;
         static Type getMapped(T &) { return nullptr; }
+        static T & getKey(T & key) { return key; }
     };
 
     template <typename First, typename Second>
@@ -42,17 +43,17 @@ namespace
     {
         using Type = Second *;
         static Type getMapped(PairNoInit<First, Second> & value) { return &value->second; }
+        static First & getKey(PairNoInit<First, Second> & value) { return value.first; }
     };
 
     template <typename Data>
     struct HashTableTraits
     {
-        using Cell = typename Data::cell_type;
-        using Value = typename Cell::value_type;
+        using Value = typename Data::value_type;
         using Mapped = typename MappedTraits<Value>::Type;
 
         static Mapped getMapped(Value & value) { return MappedTraits<Value>::getMapped(value); }
-        static auto & getKey(Value & value) { return Cell::getKey(value); }
+        static auto & getKey(Value & value) { return MappedTraits<Value>::getKey(value); }
     };
 
     template <typename Data, bool consecutive_keys_optimization_>
