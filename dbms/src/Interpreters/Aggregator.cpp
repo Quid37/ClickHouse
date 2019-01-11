@@ -1979,8 +1979,7 @@ void NO_INLINE Aggregator::mergeStreamsImplCase(
             createAggregateStates(place);
             *aggregate_data = place;
 
-            if constexpr (Method::low_cardinality_optimization)
-                state.cacheAggregateData(i, place);
+            state.cacheData(i, place);
         }
 
         AggregateDataPtr value = aggregate_data ? *aggregate_data : overflow_row;
