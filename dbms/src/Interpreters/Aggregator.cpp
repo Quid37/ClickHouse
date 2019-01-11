@@ -621,7 +621,7 @@ void NO_INLINE Aggregator::executeImplCase(
         else
         {
             /// Add only if the key already exists.
-            bool found;
+            bool found = false;
             aggregate_data = state.findKey(method.data, i, found, *aggregates_pool);
         }
 
