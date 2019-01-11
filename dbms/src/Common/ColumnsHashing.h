@@ -199,8 +199,7 @@ struct HashMethodOneNumber
     template <typename Mapped>
     ALWAYS_INLINE void cacheData(size_t /*row*/, Mapped mapped)
     {
-        if constexpr (last_elem_cache.consecutive_keys_optimization)
-            last_elem_cache.getMapped() = mapped;
+        last_elem_cache.getMapped() = mapped;
     }
 
 protected:
@@ -270,8 +269,7 @@ struct HashMethodString
     template <typename Mapped>
     ALWAYS_INLINE void cacheData(size_t /*row*/, Mapped mapped)
     {
-        if constexpr (last_elem_cache.consecutive_keys_optimization)
-            last_elem_cache.getMapped() = mapped;
+        last_elem_cache.getMapped() = mapped;
     }
 
 protected:
@@ -344,8 +342,7 @@ struct HashMethodFixedString
     template <typename Mapped>
     ALWAYS_INLINE void cacheData(size_t /*row*/, Mapped mapped)
     {
-        if constexpr (last_elem_cache.consecutive_keys_optimization)
-            last_elem_cache.getMapped() = mapped;
+        last_elem_cache.getMapped() = mapped;
     }
 
 protected:
@@ -818,8 +815,7 @@ struct HashMethodKeysFixed : private columns_hashing_impl::BaseStateKeysFixed<ty
     template <typename Mapped>
     ALWAYS_INLINE void cacheData(size_t /*row*/, Mapped mapped)
     {
-        if constexpr (last_elem_cache.consecutive_keys_optimization)
-            last_elem_cache.getMapped() = mapped;
+        last_elem_cache.getMapped() = mapped;
     }
 };
 
@@ -872,11 +868,7 @@ struct HashMethodSerialized
     }
 
     template <typename Mapped>
-    ALWAYS_INLINE void cacheData(size_t /*row*/, Mapped mapped)
-    {
-        if constexpr (last_elem_cache.consecutive_keys_optimization)
-            last_elem_cache.getMapped() = mapped;
-    }
+    ALWAYS_INLINE void cacheData(size_t /*row*/, Mapped /*mapped*/) {}
 
 protected:
     ALWAYS_INLINE StringRef getKey(size_t row, Arena & pool) const
