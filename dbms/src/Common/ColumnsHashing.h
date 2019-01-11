@@ -228,8 +228,7 @@ struct HashMethodString
         auto & value = emplaceKeyImpl(getKey(row), data, inserted, last_elem_cache);
         if (inserted)
         {
-            using Cell = typename Data::Cell;
-            auto & key = Cell::getKey(value);
+            auto & key = HashTableTraits<Data>::getKey(value);
             if (key.size)
                 key.data = pool.insert(key.data, key.size);
         }
@@ -297,8 +296,7 @@ struct HashMethodFixedString
         auto & value = emplaceKeyImpl(getKey(row), data, inserted, last_elem_cache);
         if (inserted)
         {
-            using Cell = typename Data::Cell;
-            auto & key = Cell::getKey(value);
+            auto & key = HashTableTraits<Data>::getKey(value);
             key.data = pool.insert(key.data, key.size);
         }
         return HashTableTraits<Data>::getMapped(value);
