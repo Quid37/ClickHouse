@@ -28,6 +28,7 @@ void registerAggregateFunctionTopK(AggregateFunctionFactory &);
 void registerAggregateFunctionsBitwise(AggregateFunctionFactory &);
 void registerAggregateFunctionsMaxIntersections(AggregateFunctionFactory &);
 void registerAggregateFunctionMLMethod(AggregateFunctionFactory &);
+void registerAggregateFunctionIncrementalClustering(AggregateFunctionFactory &);
 
 void registerAggregateFunctionCombinatorIf(AggregateFunctionCombinatorFactory &);
 void registerAggregateFunctionCombinatorArray(AggregateFunctionCombinatorFactory &);
@@ -67,6 +68,7 @@ void registerAggregateFunctions()
         registerAggregateFunctionHistogram(factory);
         registerAggregateFunctionRetention(factory);
         registerAggregateFunctionMLMethod(factory);
+        registerAggregateFunctionIncrementalClustering(factory);
     }
 
     {
