@@ -289,10 +289,10 @@ public:
             vt_[i] = vt_[i] * frac + adam_rhs->vt_[i] * rhs_frac;
         }
     }
-Float64 betta1_{0.2};
-Float64 betta2_{0.3};
-Float64 betta1t_{0.3};
-Float64 betta2t_{0.3};
+Float64 betta1_{0.75};
+Float64 betta2_{0.75};
+Float64 betta1t_{0.75};
+Float64 betta2t_{0.75};
 UInt32 t = 0;
 std::vector<Float64> mt_;
 std::vector<Float64> vt_;
