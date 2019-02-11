@@ -13,6 +13,7 @@
 
 #include <cmath>
 #include <exception>
+#include <algorithm>
 
 #include <Columns/ColumnsCommon.h>
 #include <Columns/ColumnsNumber.h>
@@ -52,13 +53,13 @@ public:
 
         /// simply searching for the closest cluster over all clusters
         size_t closest_cluster = 0;
-        Float64 min_distance = compute_distance_from_point(clusters[0], columns, row_num) * clusters[0].points_num;
+        Float64 min_distance = compute_distance_from_point(clusters[0].coordinates, columns, row_num) * clusters[0].points_num;
         Float64 cur_distance;
         for (size_t i = 1; i != clusters.size(); ++i)
         {
             /// Штрафуем, если в кластере слишком много элементов, чтобы они заполнялись равномерно
             /// Можно попробовать штрафовать на корень? от числа элементов
-            cur_distance = compute_distance_from_point(clusters[i], columns, row_num) * clusters[i].points_num;
+            cur_distance = compute_distance_from_point(clusters[i].coordinates, columns, row_num) * clusters[i].points_num;
             if (cur_distance < min_distance)
             {
                 min_distance = cur_distance;
@@ -78,13 +79,13 @@ public:
 
         /// simply searching for the closest cluster over all clusters
         size_t closest_cluster = 0;
-        Float64 min_distance = compute_distance(clusters[0], coordinates) * clusters[0].points_num;
+        Float64 min_distance = compute_distance(clusters[0].coordinates, coordinates) * clusters[0].points_num;
         Float64 cur_distance;
         for (size_t i = 1; i != clusters.size(); ++i)
         {
             /// Штрафуем, если в кластере слишком много элементов, чтобы они заполнялись равномерно
             /// Можно попробовать штрафовать на корень? от числа элементов
-            cur_distance = compute_distance(clusters[i], coordinates) * clusters[i].points_num;
+            cur_distance = compute_distance(clusters[i].coordinates, coordinates) * clusters[i].points_num;
             if (cur_distance < min_distance)
             {
                 min_distance = cur_distance;
@@ -92,14 +93,14 @@ public:
             }
         }
 
-        clusters[closest_cluster].append_point_from_vector(columns, coordinates);
+        clusters[closest_cluster].append_point_from_vector(coordinates);
     }
 
     void merge(const ClusteringData & rhs)
     {
-        /// По-простому объединяем попарно элементы (чтобы преположение об одинаковом числе элеметов
+        /// По-простому объединяем попарно элементы (чтобы предположение об одинаковом числе элеметов
         /// в каждом класетер сохранялось (надо бы проверить, насколько это существенно))
-        /// Для этого за квадрат ищем ближайших друг к другу соседей
+        /// Для этого пока что за квадрат ищем ближайших друг к другу соседей
 
         if (rhs.initialized_clusters < rhs.clusters.size())
         {
@@ -107,8 +108,10 @@ public:
             /// Т.к. rhs константен, то точки будут продублированы еще и там
             for (size_t i = 0; i < rhs.initialized_clusters; ++i)
             {
-                add_from_vector(rhs.clusters[i]);
+                add_from_vector(rhs.clusters[i].coordinates);
             }
+            initialized_clusters = static_cast<UInt32>(std::min(static_cast<size_t>(initialized_clusters) + rhs.initialized_clusters,
+                                                                clusters.size()));
             return;
         }
         if (initialized_clusters < clusters.size())
@@ -118,44 +121,63 @@ public:
             clusters = rhs.clusters;
             for (size_t i = 0; i < initialized_clusters; ++i)
             {
-                add_from_vector(old_clusters[i]);
+                add_from_vector(old_clusters[i].coordinates);
             }
             initialized_clusters = rhs.initialized_clusters;
 
             return;
         }
 
-        /// Чтобы все по разу
-        std::vector<size_t> rhs_free_indices(rhs.clusters.size());
+        /// Чтобы все по разу слилось мерджим каждый из элементнов rhs.cluster
+        /// в один из еще непомердженных элементов rhs.cluster
+//        std::vector<size_t> free_indices(clusters.size());
+//        for (size_t i = 0; i != clusters.size(); ++i)
+//            free_indices[i] = i;
         for (size_t i = 0; i != rhs.clusters.size(); ++i)
-            rhs_free_indices[i] = i;
-
-        size_t idx1;
-        size_t idx2;
-        for (size_t iter_num = 0; iter_num != clusters.size(); ++iter_num)
         {
-            idx1 = 0;
-            idx2 = 0;
-            Float64 min_dist = compute_distance(clusters[0], rhs.clusters[rhs_free_indices[0]]);
-            Float64 cur_dist;
-            for (size_t i = 1; i != clusters.size() - iter_num; ++i)
+            size_t closest_cluster = 0;
+            Float64 min_dist = compute_distance(clusters[i].coordinates, rhs.clusters[i].coordinates);
+            for (size_t j = i + 1; j != clusters.size(); ++j)
             {
-                for (size_t j = 1; j != rhs.clusters.size() - iter_num; ++j)
+                Float64 cur_dist = compute_distance(clusters[j].coordinates, rhs.clusters[i].coordinates);
+                if (cur_dist < min_dist)
                 {
-                    cur_dist = compute_distance(clusters[i], rhs.clusters[rhs_free_indices[j]]);
-                    if (cur_dist < min_dist)
-                    {
-                        min_dist = cur_dist;
-                        idx1 = i;
-                        idx2 = j;
-                    }
+                    min_dist = cur_dist;
+                    closest_cluster = j;
                 }
             }
 
-            clusters[idx1].merge_cluster(rhs.clusters[rhs_free_indices[idx2]]);
-            std::swap(clusters[idx1], clusters[clusters.size() - iter_num - 1]);
-            std::swap(rhs_free_indices[idx2], rhs_free_indices[rhs.clusters.size() - iter_num - 1]);
+            clusters[closest_cluster].merge_cluster(rhs.clusters[i]);
+            std::swap(clusters[closest_cluster].coordinates, clusters[i].coordinates);
+            std::swap(clusters[closest_cluster].points_num, clusters[i].points_num);
+            std::swap(clusters[closest_cluster].total_center_dist, clusters[i].total_center_dist);
         }
+//        size_t idx1;
+//        size_t idx2;
+//        for (size_t iter_num = 0; iter_num != clusters.size(); ++iter_num)
+//        {
+//            idx1 = 0;
+//            idx2 = 0;
+//            Float64 min_dist = compute_distance(clusters[0].coordinates, rhs.clusters[rhs_free_indices[0]].coordinates);
+//            Float64 cur_dist;
+//            for (size_t i = 1; i != clusters.size() - iter_num; ++i)
+//            {
+//                for (size_t j = 1; j != rhs.clusters.size() - iter_num; ++j)
+//                {
+//                    cur_dist = compute_distance(clusters[i].coordinates, rhs.clusters[rhs_free_indices[j]].coordinates);
+//                    if (cur_dist < min_dist)
+//                    {
+//                        min_dist = cur_dist;
+//                        idx1 = i;
+//                        idx2 = j;
+//                    }
+//                }
+//            }
+//
+//            clusters[idx1].merge_cluster(rhs.clusters[rhs_free_indices[idx2]]);
+//            std::swap(clusters[idx1], clusters[clusters.size() - iter_num - 1]);
+//            std::swap(rhs_free_indices[idx2], rhs_free_indices[rhs.clusters.size() - iter_num - 1]);
+//        }
     }
 
     void write(WriteBuffer & buf) const
@@ -169,8 +191,8 @@ public:
     void read(ReadBuffer & buf)
     {
         readBinary(clusters_num, buf);
-        readinary(dimensions, buf);
-        readinary(initialized_clusters, buf);
+        readBinary(dimensions, buf);
+        readBinary(initialized_clusters, buf);
         readBinary(clusters, buf);
     }
 
@@ -178,11 +200,49 @@ public:
     {
         /// Можно запилить обычную кластеризацию на малом числе элементов
 
+        size_t closest_cluster = 0;
+        Float64 min_dist = compute_distance(clusters[0].coordinates, predict_feature);
+        for (size_t i = 1; i != clusters.size(); ++i)
+        {
+            Float64 cur_dist = compute_distance(clusters[i].coordinates, predict_feature);
+            if (cur_dist < min_dist)
+            {
+                min_dist = cur_dist;
+                closest_cluster = i;
+            }
+        }
+
+        std::cout << "\n\nmy prediction: " << closest_cluster << "\n";
+        std::cout << "with min dist: " << min_dist << "\n";
+        for (size_t j = 0; j != clusters[closest_cluster].coordinates.size(); ++j)
+        {
+            std::cout << clusters[closest_cluster].coordinates[j] << " ";
+        }
+        std::cout << "\n\n";
+
         // TODO
+        std::ignore = predict_feature;
+        return 0;
+    }
+
+    void print_clusters() const
+    {
+        for (size_t i = 0; i < clusters.size(); ++i)
+        {
+            for (size_t j = 0; j < clusters[i].coordinates.size(); ++j)
+            {
+                std::cout << clusters[i].coordinates[j] << " ";
+            }
+            std::cout << "\n";
+            std::cout << "points num: " << clusters[i].points_num << "\n";
+            if (clusters[i].points_num)
+                std::cout << "avg dist: " << clusters[i].total_center_dist / clusters[i].points_num << "\n";
+            std::cout << "\n";
+        }
     }
 
 private:
-    Float64 compute_distance(std::vector<Float64> & point1, std::vector<Float64> & point2)
+    Float64 compute_distance(const std::vector<Float64> & point1, const std::vector<Float64> & point2) const
     {
         Float64 distance = 0;
         Float64 coordinate_diff;
@@ -194,7 +254,7 @@ private:
 
         return std::sqrt(distance);
     }
-    Float64 compute_distance_from_point(std::vector<Float64> & point1, const IColumn ** columns, size_t row_num)
+    Float64 compute_distance_from_point(const std::vector<Float64> & point1, const IColumn ** columns, size_t row_num) const
     {
         Float64 distance = 0;
         Float64 coordinate_diff;
@@ -211,10 +271,13 @@ private:
     {
         Cluster()
         {}
-//        explicit Cluster(UInt32 dimensions)
-//        {
-//            coordinates.resize(dimensions, 0.0);
-//        }
+
+        Cluster(UInt32 dimensions)
+        : points_num(0), total_center_dist(0.0)
+        {
+            coordinates.resize(0, dimensions);
+        }
+
         Cluster(std::vector<Float64> coordinates)
         : coordinates(std::move(coordinates)), points_num(1), total_center_dist(0.0)
         {}
@@ -233,7 +296,7 @@ private:
         void append_point(const IColumn ** columns, size_t row_num, Float64 distance)
         {
             if (points_num == 0)
-                throw Exception("This should not be reached 1", ErrorCodes::LOGICAL_ERROR)
+                throw Exception("This should not be reached 1", ErrorCodes::LOGICAL_ERROR);
 
             Float64 weight = std::sqrt(Float64{1.0} / points_num);
             for (size_t i = 0; i != coordinates.size(); ++i)
@@ -242,27 +305,30 @@ private:
                         static_cast<const ColumnVector<Float64> &>(*columns[i]).getData()[row_num] * (1 - weight);
             }
             total_center_dist += distance;
+            ++points_num;
         }
         void append_point_from_vector(const std::vector<Float64> & new_coordinates)
         {
             if (points_num == 0)
-                throw Exception("This should not be reached 2", ErrorCodes::LOGICAL_ERROR)
+                throw Exception("This should not be reached 2", ErrorCodes::LOGICAL_ERROR);
 
-            ++points_num;
             Float64 weight = std::sqrt(Float64{1.0} / points_num);
+            Float64 distance = 0;
             for (size_t i = 0; i != coordinates.size(); ++i)
             {
+                distance += (coordinates[i] - new_coordinates[i]) * (coordinates[i] - new_coordinates[i]);
                 coordinates[i] = coordinates[i] * weight + new_coordinates[i] * (1 - weight);
             }
-            total_center_dist += distance;
+            total_center_dist += std::sqrt(distance);
+            ++points_num;
         }
         void merge_cluster(const Cluster & other)
         {
             if (points_num == 0 || other.points_num == 0)
-                throw Exception("This should not be reached 3", ErrorCodes::LOGICAL_ERROR)
+                throw Exception("This should not be reached 3", ErrorCodes::LOGICAL_ERROR);
 
+            /// попробовать брать квадраты весов
             Float64 weight = Float64(points_num) / (points_num + other.points_num);
-            weight *= weight;
 
             for (size_t i = 0; i != coordinates.size(); ++i)
             {
@@ -281,7 +347,7 @@ private:
 
     UInt32 clusters_num;
     UInt32 dimensions;
-    Uint32 initialized_clusters;
+    UInt32 initialized_clusters;
 
     std::vector<Cluster> clusters;
 };

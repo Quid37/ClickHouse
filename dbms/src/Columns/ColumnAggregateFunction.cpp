@@ -127,11 +127,13 @@ MutableColumnPtr ColumnAggregateFunction::predictValues(Block & block, const Col
     if (ML_function)
     {
         size_t row_num = 0;
-        for (auto val : data) {
+        for (auto val : data)
+        {
             ML_function->predictResultInto(val, *res, block, row_num, arguments);
             ++row_num;
         }
-    } else {
+    } else
+    {
         throw Exception("Illegal aggregate function is passed",
                 ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
     }
