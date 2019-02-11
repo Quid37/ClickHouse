@@ -29,6 +29,7 @@ void registerAggregateFunctionsBitwise(AggregateFunctionFactory &);
 void registerAggregateFunctionsMaxIntersections(AggregateFunctionFactory &);
 void registerAggregateFunctionMLMethod(AggregateFunctionFactory &);
 void registerAggregateFunctionIncrementalClustering(AggregateFunctionFactory &);
+void registerAggregateFunctionEntropy(AggregateFunctionFactory &);
 
 void registerAggregateFunctionCombinatorIf(AggregateFunctionCombinatorFactory &);
 void registerAggregateFunctionCombinatorArray(AggregateFunctionCombinatorFactory &);
@@ -69,6 +70,7 @@ void registerAggregateFunctions()
         registerAggregateFunctionRetention(factory);
         registerAggregateFunctionMLMethod(factory);
         registerAggregateFunctionIncrementalClustering(factory);
+        registerAggregateFunctionEntropy(factory);
     }
 
     {

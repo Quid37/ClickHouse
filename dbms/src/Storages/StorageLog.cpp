@@ -13,7 +13,7 @@
 
 #include <DataTypes/NestedUtils.h>
 
-#include <DataStreams/IProfilingBlockInputStream.h>
+#include <DataStreams/IBlockInputStream.h>
 #include <DataStreams/IBlockOutputStream.h>
 
 #include <Columns/ColumnArray.h>
@@ -45,7 +45,7 @@ namespace ErrorCodes
 }
 
 
-class LogBlockInputStream final : public IProfilingBlockInputStream
+class LogBlockInputStream final : public IBlockInputStream
 {
 public:
     LogBlockInputStream(
@@ -578,7 +578,7 @@ BlockInputStreams StorageLog::read(
     const SelectQueryInfo & /*query_info*/,
     const Context & context,
     QueryProcessingStage::Enum /*processed_stage*/,
-    size_t max_block_size,
+    UInt64 max_block_size,
     unsigned num_streams)
 {
     check(column_names);

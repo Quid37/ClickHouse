@@ -12,7 +12,7 @@
 #include <Formats/FormatFactory.h>
 #include <DataStreams/IBlockOutputStream.h>
 #include <DataStreams/UnionBlockInputStream.h>
-#include <DataStreams/IProfilingBlockInputStream.h>
+#include <DataStreams/IBlockInputStream.h>
 #include <DataStreams/OwningBlockInputStream.h>
 
 
@@ -41,14 +41,14 @@ StorageHDFS::StorageHDFS(const String & uri_,
 namespace
 {
 
-class HDFSBlockInputStream : public IProfilingBlockInputStream
+class HDFSBlockInputStream : public IBlockInputStream
 {
 public:
     HDFSBlockInputStream(const String & uri,
         const String & format,
         const Block & sample_block,
         const Context & context,
-        size_t max_block_size)
+        UInt64 max_block_size)
     {
         std::unique_ptr<ReadBuffer> read_buf = std::make_unique<ReadBufferFromHDFS>(uri);
         auto input_stream = FormatFactory::instance().getInput(format, *read_buf, sample_block, context, max_block_size);
@@ -133,7 +133,7 @@ BlockInputStreams StorageHDFS::read(
     const SelectQueryInfo & /*query_info*/,
     const Context & context_,
     QueryProcessingStage::Enum  /*processed_stage*/,
-    size_t max_block_size,
+    UInt64 max_block_size,
     unsigned /*num_streams*/)
 {
     return {std::make_shared<HDFSBlockInputStream>(
