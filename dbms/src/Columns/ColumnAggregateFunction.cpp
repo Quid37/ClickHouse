@@ -3,6 +3,8 @@
 #include <AggregateFunctions/AggregateFunctionState.h>
 #include <DataStreams/ColumnGathererStream.h>
 #include <IO/WriteBufferFromArena.h>
+#include <IO/WriteBufferFromString.h>
+#include <IO/Operators.h>
 #include <Common/SipHash.h>
 #include <Common/AlignedBuffer.h>
 #include <Common/typeid_cast.h>
@@ -33,9 +35,9 @@ void ColumnAggregateFunction::addArena(ArenaPtr arena_)
     arenas.push_back(arena_);
 }
 
-bool ColumnAggregateFunction::convertion(MutableColumnPtr* res_) const
+bool ColumnAggregateFunction::convertion(MutableColumnPtr *res_) const
 {
-    if (const AggregateFunctionState * function_state = typeid_cast<const AggregateFunctionState *>(func.get()))
+    if (const AggregateFunctionState *function_state = typeid_cast<const AggregateFunctionState *>(func.get()))
     {
         auto res = createView();
         res->set(function_state->getNestedFunction());
@@ -106,38 +108,38 @@ MutableColumnPtr ColumnAggregateFunction::convertToValues() const
 
 MutableColumnPtr ColumnAggregateFunction::predictValues(Block & block, const ColumnNumbers & arguments) const
 {
-//    if (const AggregateFunctionState * function_state = typeid_cast<const AggregateFunctionState *>(func.get()))
-//    {
-//        auto res = createView();
-//        res->set(function_state->getNestedFunction());
-//        res->data.assign(data.begin(), data.end());
-//        return res;
-//    }
-//
-//    MutableColumnPtr res = func->getReturnType()->createColumn();
-//    res->reserve(data.size());
     MutableColumnPtr res;
     if (convertion(&res))
     {
         return res;
     }
 
-//    auto ML_function = typeid_cast<AggregateFunctionMLMethod<LinearRegressionData, NameLinearRegression> *>(func.get());
-    auto ML_function = typeid_cast<AggregateFunctionMLMethod<LinearModelData, NameLinearRegression> *>(func.get());
-    if (ML_function)
+    /// На моих тестах дважды в эту функцию приходит нечтно, имеющее data.size() == 0 однако оно по сути ничего не делает в следующих строках
+
+    auto ML_function_Linear = typeid_cast<AggregateFunctionMLMethod<LinearModelData, NameLinearRegression> *>(func.get());
+    auto ML_function_Logistic = typeid_cast<AggregateFunctionMLMethod<LinearModelData, NameLogisticRegression> *>(func.get());
+    if (ML_function_Linear)
     {
         size_t row_num = 0;
         for (auto val : data)
         {
-            ML_function->predictResultInto(val, *res, block, row_num, arguments);
+            ML_function_Linear->predictResultInto(val, *res, block, arguments);
             ++row_num;
         }
-    } else
+
+    } else if (ML_function_Logistic)
+    {
+        size_t row_num = 0;
+        for (auto val : data)
+        {
+            ML_function_Logistic->predictResultInto(val, *res, block, arguments);
+            ++row_num;
+        }
+    } else 
     {
         throw Exception("Illegal aggregate function is passed",
                 ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
     }
-
     return res;
 }
 
@@ -318,11 +320,17 @@ MutableColumnPtr ColumnAggregateFunction::cloneEmpty() const
     return create(func, Arenas(1, std::make_shared<Arena>()));
 }
 
+String ColumnAggregateFunction::getTypeString() const
+{
+    return DataTypeAggregateFunction(func, func->getArgumentTypes(), func->getParameters()).getName();
+}
+
 Field ColumnAggregateFunction::operator[](size_t n) const
 {
-    Field field = String();
+    Field field = AggregateFunctionStateData();
+    field.get<AggregateFunctionStateData &>().name = getTypeString();
     {
-        WriteBufferFromString buffer(field.get<String &>());
+        WriteBufferFromString buffer(field.get<AggregateFunctionStateData &>().data);
         func->serialize(data[n], buffer);
     }
     return field;
@@ -330,9 +338,10 @@ Field ColumnAggregateFunction::operator[](size_t n) const
 
 void ColumnAggregateFunction::get(size_t n, Field & res) const
 {
-    res = String();
+    res = AggregateFunctionStateData();
+    res.get<AggregateFunctionStateData &>().name = getTypeString();
     {
-        WriteBufferFromString buffer(res.get<String &>());
+        WriteBufferFromString buffer(res.get<AggregateFunctionStateData &>().data);
         func->serialize(data[n], buffer);
     }
 }
@@ -397,13 +406,23 @@ static void pushBackAndCreateState(ColumnAggregateFunction::Container & data, Ar
     }
 }
 
-
 void ColumnAggregateFunction::insert(const Field & x)
 {
+    String type_string = getTypeString();
+
+    if (x.getType() != Field::Types::AggregateFunctionState)
+        throw Exception(String("Inserting field of type ") + x.getTypeName() + " into ColumnAggregateFunction. "
+                        "Expected " + Field::Types::toString(Field::Types::AggregateFunctionState), ErrorCodes::LOGICAL_ERROR);
+
+    auto & field_name = x.get<const AggregateFunctionStateData &>().name;
+    if (type_string != field_name)
+        throw Exception("Cannot insert filed with type " + field_name + " into column with type " + type_string,
+                ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
+
     ensureOwnership();
     Arena & arena = createOrGetArena();
     pushBackAndCreateState(data, arena, func.get());
-    ReadBufferFromString read_buffer(x.get<const String &>());
+    ReadBufferFromString read_buffer(x.get<const AggregateFunctionStateData &>().data);
     func->deserialize(data.back(), read_buffer, &arena);
 }
 
@@ -525,12 +544,13 @@ void ColumnAggregateFunction::getExtremes(Field & min, Field & max) const
     AlignedBuffer place_buffer(func->sizeOfData(), func->alignOfData());
     AggregateDataPtr place = place_buffer.data();
 
-    String serialized;
+    AggregateFunctionStateData serialized;
+    serialized.name = getTypeString();
 
     func->create(place);
     try
     {
-        WriteBufferFromString buffer(serialized);
+        WriteBufferFromString buffer(serialized.data);
         func->serialize(place, buffer);
     }
     catch (...)
