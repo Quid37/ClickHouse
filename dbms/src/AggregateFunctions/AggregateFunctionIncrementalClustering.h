@@ -102,6 +102,8 @@ public:
         /// в каждом класетер сохранялось (надо бы проверить, насколько это существенно))
         /// Для этого пока что за квадрат ищем ближайших друг к другу соседей
 
+        std::cout << "\n\nSTART TO MERGE\n\n";
+
         if (rhs.initialized_clusters < rhs.clusters.size())
         {
             /// Тут мы передаем все точки от rhs к *this
@@ -185,7 +187,10 @@ public:
         writeBinary(clusters_num, buf);
         writeBinary(dimensions, buf);
         writeBinary(initialized_clusters, buf);
-        writeBinary(clusters, buf);
+        for (auto & cluster : clusters)
+        {
+            cluster.write(buf);
+        }
     }
 
     void read(ReadBuffer & buf)
@@ -193,7 +198,10 @@ public:
         readBinary(clusters_num, buf);
         readBinary(dimensions, buf);
         readBinary(initialized_clusters, buf);
-        readBinary(clusters, buf);
+        for (auto & cluster : clusters)
+        {
+            cluster.read(buf);
+        }
     }
 
     Float64 predict(const std::vector<Float64> & predict_feature) const
@@ -225,19 +233,32 @@ public:
         return 0;
     }
 
-    void print_clusters() const
+    void print_clusters(ColumnVector<Float64>& column) const
     {
         for (size_t i = 0; i < clusters.size(); ++i)
         {
-            for (size_t j = 0; j < clusters[i].coordinates.size(); ++j)
+//            std::cout << "\n";
+//            for (size_t j = 0; j < clusters[i].coordinates.size(); ++j)
+//            {
+//                std::cout << clusters[i].coordinates[j] << " ";
+//                column.getData().push_back(clusters[i].coordinates[j]);
+//            }
+//            std::cout << "points num: " << clusters[i].points_num << "\n";
+//            if (clusters[i].points_num)
+//            {
+//                std::cout << "avg dist: " << clusters[i].total_center_dist / clusters[i].points_num << "\n";
+//            }
+//            std::cout << "\n";
+        }
+        std::cout << "\n\nIM GOING TO PRING CLUSTERS\n\n";
+        auto predicted_clusters = make_prediction();
+        std::cout << "PRINTER\n\n";
+        for (auto& cluster : predicted_clusters)
+        {
+            for (auto& coord : cluster.coordinates)
             {
-                std::cout << clusters[i].coordinates[j] << " ";
+                column.getData().push_back(coord);
             }
-            std::cout << "\n";
-            std::cout << "points num: " << clusters[i].points_num << "\n";
-            if (clusters[i].points_num)
-                std::cout << "avg dist: " << clusters[i].total_center_dist / clusters[i].points_num << "\n";
-            std::cout << "\n";
         }
     }
 
@@ -245,10 +266,9 @@ private:
     Float64 compute_distance(const std::vector<Float64> & point1, const std::vector<Float64> & point2) const
     {
         Float64 distance = 0;
-        Float64 coordinate_diff;
         for (size_t i = 0; i != point1.size(); ++i)
         {
-            coordinate_diff = point1[i] - point2[i];
+            Float64 coordinate_diff = point1[i] - point2[i];
             distance += coordinate_diff * coordinate_diff;
         }
 
@@ -257,10 +277,9 @@ private:
     Float64 compute_distance_from_point(const std::vector<Float64> & point1, const IColumn ** columns, size_t row_num) const
     {
         Float64 distance = 0;
-        Float64 coordinate_diff;
         for (size_t i = 0; i < point1.size(); ++i)
         {
-            coordinate_diff = point1[i] - static_cast<const ColumnVector<Float64> &>(*columns[i]).getData()[row_num];
+            Float64 coordinate_diff = point1[i] - static_cast<const ColumnVector<Float64> &>(*columns[i]).getData()[row_num];
             distance += coordinate_diff * coordinate_diff;
         }
 
@@ -270,7 +289,10 @@ private:
     struct Cluster
     {
         Cluster()
-        {}
+        : points_num(0), total_center_dist(0.0)
+        {
+            coordinates = std::vector<Float64>();
+        }
 
         Cluster(UInt32 dimensions)
         : points_num(0), total_center_dist(0.0)
@@ -282,15 +304,20 @@ private:
         : coordinates(std::move(coordinates)), points_num(1), total_center_dist(0.0)
         {}
 
+        Cluster(const Cluster& other)
+        : coordinates(other.coordinates),
+        points_num(other.points_num),
+        total_center_dist(other.total_center_dist)
+        {}
+
         Cluster(const IColumn ** columns, size_t row_num, size_t dimensions)
         : points_num(1), total_center_dist(0.0)
         {
-            coordinates.reserve(dimensions);
+            coordinates.resize(dimensions);
             for (size_t i = 0; i != dimensions; ++i)
             {
                 coordinates[i] = static_cast<const ColumnVector<Float64> &>(*columns[i]).getData()[row_num];
             }
-
         }
 
         void append_point(const IColumn ** columns, size_t row_num, Float64 distance)
@@ -310,7 +337,8 @@ private:
         void append_point_from_vector(const std::vector<Float64> & new_coordinates)
         {
             if (points_num == 0)
-                throw Exception("This should not be reached 2", ErrorCodes::LOGICAL_ERROR);
+                return;
+//                throw Exception("This should not be reached 2", ErrorCodes::LOGICAL_ERROR);
 
             Float64 weight = std::sqrt(Float64{1.0} / points_num);
             Float64 distance = 0;
@@ -325,7 +353,8 @@ private:
         void merge_cluster(const Cluster & other)
         {
             if (points_num == 0 || other.points_num == 0)
-                throw Exception("This should not be reached 3", ErrorCodes::LOGICAL_ERROR);
+                return;
+//                throw Exception("This should not be reached 3", ErrorCodes::LOGICAL_ERROR);
 
             /// попробовать брать квадраты весов
             Float64 weight = Float64(points_num) / (points_num + other.points_num);
@@ -343,7 +372,67 @@ private:
         std::vector<Float64> coordinates;
         UInt32 points_num = 0;
         Float64 total_center_dist = 0.0;
+
+        void write(WriteBuffer & buf) const
+        {
+            writeBinary(coordinates, buf);
+            writeBinary(points_num, buf);
+            writeBinary(total_center_dist, buf);
+        }
+        void read(ReadBuffer & buf)
+        {
+            readBinary(coordinates, buf);
+            readBinary(points_num, buf);
+            readBinary(total_center_dist, buf);
+        }
     };
+
+    std::vector<Cluster> make_prediction() const {
+        std::vector<Cluster> predicted_clusters;
+        size_t points_per_cluster = clusters.size() / clusters_num;
+
+        std::vector<int> mask(clusters.size(), 0);
+        for (size_t i = 0; i != clusters.size(); ++i)
+        {
+            if (mask[i] || clusters[i].coordinates.empty())
+                continue;
+
+            predicted_clusters.push_back(clusters[i]);
+            mask[i] = 1;
+
+            for (size_t iter = 0; iter != points_per_cluster - 1; ++iter)
+            {
+                Float64 min_dist = 0;
+                ssize_t closest_cluster = -1;
+                for (size_t j = i + 1; j != clusters.size(); ++j)
+                {
+                    if (mask[j] || clusters[j].coordinates.empty())
+                        continue;
+
+                    auto cur_dist = compute_distance(clusters[i].coordinates, clusters[j].coordinates);
+                    if (closest_cluster == -1 || min_dist > cur_dist)
+                    {
+                        min_dist = cur_dist;
+                        closest_cluster = j;
+                    }
+                }
+
+//                if (closest_cluster == -1)
+//                    throw std::runtime_error("somethings wrong");
+
+                predicted_clusters[predicted_clusters.size() - 1].merge_cluster(clusters[closest_cluster]);
+                mask[closest_cluster] = 1;
+            }
+        }
+
+        for (size_t i = 0; i != clusters.size(); ++i)
+        {
+//            if (!mask[i])
+//                throw std::runtime_error("not mask");
+        }
+
+        return predicted_clusters;
+    }
 
     UInt32 clusters_num;
     UInt32 dimensions;
@@ -358,8 +447,11 @@ class AggregateFunctionIncrementalClustering final : public IAggregateFunctionDa
 public:
     String getName() const override { return "IncrementalClustering"; }
 
-    explicit AggregateFunctionIncrementalClustering(UInt32 clusters_num, UInt32 dimensions)
-    : clusters_num(clusters_num), dimensions(dimensions)
+    explicit AggregateFunctionIncrementalClustering(UInt32 clusters_num, UInt32 dimensions,
+                                                    const DataTypes & argument_types,
+                                                    const Array & params)
+    : IAggregateFunctionDataHelper<ClusteringData, AggregateFunctionIncrementalClustering>(argument_types, params),
+    clusters_num(clusters_num), dimensions(dimensions)
     {}
 
     DataTypePtr getReturnType() const override
@@ -417,7 +509,10 @@ public:
     {
         std::ignore = place;
         std::ignore = to;
-        throw Exception("not implemented", ErrorCodes::LOGICAL_ERROR)
+
+        auto &column = dynamic_cast<ColumnVector<Float64> &>(to);
+        this->data(place).print_clusters(column);
+
     }
 
     const char * getHeaderFilePath() const override { return __FILE__; }

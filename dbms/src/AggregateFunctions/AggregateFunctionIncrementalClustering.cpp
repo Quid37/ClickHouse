@@ -30,7 +30,7 @@ AggregateFunctionPtr createAggregateFunctionIncrementalClustering(
     if (argument_types.size() < 1)
         throw Exception("Aggregate function " + name + " requires at least two arguments", ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH);
 
-    return std::make_shared<AggregateFunctionIncrementalClustering>(clusters_num, argument_types.size());
+    return std::make_shared<AggregateFunctionIncrementalClustering>(clusters_num, argument_types.size(), argument_types, parameters);
 }
 
 }
