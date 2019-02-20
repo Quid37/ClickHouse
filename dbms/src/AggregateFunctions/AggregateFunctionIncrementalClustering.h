@@ -40,7 +40,7 @@ public:
     ClusteringData(UInt32 clusters_num, UInt32 dimensions)
     : clusters_num(clusters_num), dimensions(dimensions), initialized_clusters(0)
     {
-        clusters.resize(10 * clusters_num, dimensions);
+        clusters.resize(30 * clusters_num, dimensions);
     }
 
     void add(const IColumn ** columns, size_t row_num)
@@ -53,13 +53,15 @@ public:
 
         /// simply searching for the closest cluster over all clusters
         size_t closest_cluster = 0;
-        Float64 min_distance = compute_distance_from_point(clusters[0].coordinates, columns, row_num) * clusters[0].points_num;
+//        Float64 min_distance = compute_distance_from_point(clusters[0].coordinates, columns, row_num) * clusters[0].points_num;
+        Float64 min_distance = compute_distance_from_point(clusters[0].coordinates, columns, row_num);
         Float64 cur_distance;
         for (size_t i = 1; i != clusters.size(); ++i)
         {
             /// Штрафуем, если в кластере слишком много элементов, чтобы они заполнялись равномерно
             /// Можно попробовать штрафовать на корень? от числа элементов
-            cur_distance = compute_distance_from_point(clusters[i].coordinates, columns, row_num) * clusters[i].points_num;
+//            cur_distance = compute_distance_from_point(clusters[i].coordinates, columns, row_num) * clusters[i].points_num;
+            cur_distance = compute_distance_from_point(clusters[i].coordinates, columns, row_num);
             if (cur_distance < min_distance)
             {
                 min_distance = cur_distance;
@@ -79,13 +81,15 @@ public:
 
         /// simply searching for the closest cluster over all clusters
         size_t closest_cluster = 0;
-        Float64 min_distance = compute_distance(clusters[0].coordinates, coordinates) * clusters[0].points_num;
+//        Float64 min_distance = compute_distance(clusters[0].coordinates, coordinates) * clusters[0].points_num;
+        Float64 min_distance = compute_distance(clusters[0].coordinates, coordinates);
         Float64 cur_distance;
         for (size_t i = 1; i != clusters.size(); ++i)
         {
             /// Штрафуем, если в кластере слишком много элементов, чтобы они заполнялись равномерно
             /// Можно попробовать штрафовать на корень? от числа элементов
-            cur_distance = compute_distance(clusters[i].coordinates, coordinates) * clusters[i].points_num;
+//            cur_distance = compute_distance(clusters[i].coordinates, coordinates) * clusters[i].points_num;
+            cur_distance = compute_distance(clusters[i].coordinates, coordinates);
             if (cur_distance < min_distance)
             {
                 min_distance = cur_distance;
@@ -251,7 +255,8 @@ public:
 //            std::cout << "\n";
         }
         std::cout << "\n\nIM GOING TO PRING CLUSTERS\n\n";
-        auto predicted_clusters = make_prediction();
+//        auto predicted_clusters = make_prediction();
+        auto predicted_clusters = clusters;
         std::cout << "PRINTER\n\n";
         for (auto& cluster : predicted_clusters)
         {
