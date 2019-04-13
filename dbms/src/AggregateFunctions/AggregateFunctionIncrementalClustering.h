@@ -46,7 +46,8 @@ public:
     }
 
     void add(const IColumn ** columns, size_t row_num) {
-        if (clusters.size() < multiplication_factor * clusters_num) {
+        if (clusters.size() < multiplication_factor * clusters_num)
+        {
             clusters.emplace_back(columns, row_num, dimensions);
             return;
         }
@@ -55,11 +56,13 @@ public:
         size_t closest_cluster = 0;
         Float64 min_distance = compute_distance_from_point(clusters[0].center(), columns, row_num) * cluster_penalty(clusters[0].size());
         Float64 cur_distance;
-        for (size_t i = 1; i != clusters.size(); ++i) {
+        for (size_t i = 1; i != clusters.size(); ++i)
+        {
             /// Штрафуем, если в кластере слишком много элементов, чтобы они заполнялись равномерно
             /// Можно попробовать штрафовать на корень? от числа элементов
             cur_distance = compute_distance_from_point(clusters[i].center(), columns, row_num) * cluster_penalty(clusters[i].size());
-            if (cur_distance < min_distance) {
+            if (cur_distance < min_distance)
+            {
                 min_distance = cur_distance;
                 closest_cluster = i;
             }
@@ -70,7 +73,8 @@ public:
 
     void add_from_vector(const std::vector<Float64> & coordinates)
     {
-        if (clusters.size() < multiplication_factor * clusters_num) {
+        if (clusters.size() < multiplication_factor * clusters_num)
+        {
             clusters.emplace_back(coordinates);
             return;
         }
@@ -240,18 +244,6 @@ private:
     class Cluster
     {
     public:
-        // Cluster()
-        // : points_num(0), total_center_dist(0.0)
-        // {
-        //     coordinates = std::vector<Float64>();
-        // }
-
-        // Cluster(UInt32 dimensions)
-        // : points_num(0), total_center_dist(0.0)
-        // {
-        //     coordinates.resize(dimensions, 0);
-        // }
-
         explicit Cluster(std::vector<Float64> coordinates)
         : coordinates(std::move(coordinates)), points_num(1), total_center_dist(0.0)
         {}
@@ -370,7 +362,8 @@ private:
         Float64 total_center_dist = 0.0;
     };
 
-    std::vector<Cluster> make_prediction() const {
+    std::vector<Cluster> make_prediction() const
+    {
         std::vector<Cluster> predicted_clusters;
         size_t points_per_cluster = clusters.size() / clusters_num;
 
