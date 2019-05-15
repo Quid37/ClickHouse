@@ -1,6 +1,6 @@
 #include <Common/Exception.h>
 #include <Interpreters/Context.h>
-#include <Interpreters/Settings.h>
+#include <Core/Settings.h>
 #include <DataStreams/MaterializingBlockOutputStream.h>
 #include <Formats/FormatSettings.h>
 #include <Formats/FormatFactory.h>
@@ -40,6 +40,7 @@ BlockInputStreamPtr FormatFactory::getInput(const String & name, ReadBuffer & bu
     format_settings.csv.allow_single_quotes = settings.format_csv_allow_single_quotes;
     format_settings.csv.allow_double_quotes = settings.format_csv_allow_double_quotes;
     format_settings.values.interpret_expressions = settings.input_format_values_interpret_expressions;
+    format_settings.with_names_use_header = settings.input_format_with_names_use_header;
     format_settings.skip_unknown_fields = settings.input_format_skip_unknown_fields;
     format_settings.import_nested_json = settings.input_format_import_nested_json;
     format_settings.date_time_input_format = settings.date_time_input_format;
@@ -69,6 +70,7 @@ BlockOutputStreamPtr FormatFactory::getOutput(const String & name, WriteBuffer &
     format_settings.pretty.max_column_pad_width = settings.output_format_pretty_max_column_pad_width;
     format_settings.pretty.color = settings.output_format_pretty_color;
     format_settings.write_statistics = settings.output_format_write_statistics;
+    format_settings.parquet.row_group_size = settings.output_format_parquet_row_group_size;
 
     /** Materialization is needed, because formats can use the functions `IDataType`,
       *  which only work with full columns.
@@ -111,6 +113,9 @@ void registerInputFormatTSKV(FormatFactory & factory);
 void registerOutputFormatTSKV(FormatFactory & factory);
 void registerInputFormatJSONEachRow(FormatFactory & factory);
 void registerOutputFormatJSONEachRow(FormatFactory & factory);
+void registerInputFormatParquet(FormatFactory & factory);
+void registerOutputFormatParquet(FormatFactory & factory);
+void registerInputFormatProtobuf(FormatFactory & factory);
 void registerOutputFormatProtobuf(FormatFactory & factory);
 
 /// Output only (presentational) formats.
@@ -147,8 +152,11 @@ FormatFactory::FormatFactory()
     registerOutputFormatTSKV(*this);
     registerInputFormatJSONEachRow(*this);
     registerOutputFormatJSONEachRow(*this);
+    registerInputFormatProtobuf(*this);
     registerOutputFormatProtobuf(*this);
     registerInputFormatCapnProto(*this);
+    registerInputFormatParquet(*this);
+    registerOutputFormatParquet(*this);
 
     registerOutputFormatPretty(*this);
     registerOutputFormatPrettyCompact(*this);

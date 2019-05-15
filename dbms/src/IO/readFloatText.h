@@ -312,7 +312,7 @@ template <typename T, typename ReturnType>
 ReturnType readFloatTextFastImpl(T & x, ReadBuffer & in)
 {
     static_assert(std::is_same_v<T, double> || std::is_same_v<T, float>, "Argument for readFloatTextImpl must be float or double");
-    static_assert('a' > '.' && 'A' > '.' && '\n' < '.' && '\t' < '.' && '\'' < '.' && '"' < '.', "Layout of char is not like ASCII");
+    static_assert('a' > '.' && 'A' > '.' && '\n' < '.' && '\t' < '.' && '\'' < '.' && '"' < '.', "Layout of char is not like ASCII"); //-V501
 
     static constexpr bool throw_exception = std::is_same_v<ReturnType, void>;
 
@@ -618,7 +618,7 @@ inline void readDigits(ReadBuffer & buf, T & x, unsigned int & digits, int & exp
 
                 ++places; // num zeroes before + current digit
                 if (digits + places > max_digits)
-                    throw Exception("Too many digits in decimal value", ErrorCodes::ARGUMENT_OUT_OF_BOUND);
+                    throw Exception("Too many digits (" + std::to_string(digits + places) + " > " + std::to_string(max_digits) + ") in decimal value", ErrorCodes::ARGUMENT_OUT_OF_BOUND);
 
                 digits += places;
                 if (after_point)

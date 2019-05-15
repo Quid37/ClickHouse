@@ -35,7 +35,9 @@ void ColumnAggregateFunction::addArena(ArenaPtr arena_)
     arenas.push_back(arena_);
 }
 
-bool ColumnAggregateFunction::convertion(MutableColumnPtr *res_) const
+/// This function is used in convertToValues() and predictValues()
+/// and is written here to avoid repetitions
+bool ColumnAggregateFunction::tryFinalizeAggregateFunction(MutableColumnPtr *res_) const
 {
     if (const AggregateFunctionState *function_state = typeid_cast<const AggregateFunctionState *>(func.get()))
     {
@@ -84,18 +86,13 @@ MutableColumnPtr ColumnAggregateFunction::convertToValues() const
         *   AggregateFunction(quantileTiming(0.5), UInt64)
         * into UInt16 - already finished result of `quantileTiming`.
         */
-//    if (const AggregateFunctionState * function_state = typeid_cast<const AggregateFunctionState *>(func.get()))
-//    {
-//        auto res = createView();
-//        res->set(function_state->getNestedFunction());
-//        res->data.assign(data.begin(), data.end());
-//        return res;
-//    }
-//
-//    MutableColumnPtr res = func->getReturnType()->createColumn();
-//    res->reserve(data.size());
+
+    /** Convertion function is used in convertToValues and predictValues
+        * in the similar part of both functions
+        */
+
     MutableColumnPtr res;
-    if (convertion(&res))
+    if (tryFinalizeAggregateFunction(&res))
     {
         return res;
     }
@@ -106,36 +103,23 @@ MutableColumnPtr ColumnAggregateFunction::convertToValues() const
     return res;
 }
 
-MutableColumnPtr ColumnAggregateFunction::predictValues(Block & block, const ColumnNumbers & arguments) const
+MutableColumnPtr ColumnAggregateFunction::predictValues(Block & block, const ColumnNumbers & arguments, const Context & context) const
 {
     MutableColumnPtr res;
-    if (convertion(&res))
+    tryFinalizeAggregateFunction(&res);
+
+    auto ML_function = func.get();
+    if (ML_function)
     {
-        return res;
+        size_t row_num = 0;
+        for (auto val : data)
+        {
+            ML_function->predictValues(val, *res, block, arguments, context);
+            ++row_num;
+        }
+
     }
-
-    /// На моих тестах дважды в эту функцию приходит нечтно, имеющее data.size() == 0 однако оно по сути ничего не делает в следующих строках
-
-    auto ML_function_Linear = typeid_cast<AggregateFunctionMLMethod<LinearModelData, NameLinearRegression> *>(func.get());
-    auto ML_function_Logistic = typeid_cast<AggregateFunctionMLMethod<LinearModelData, NameLogisticRegression> *>(func.get());
-    if (ML_function_Linear)
-    {
-        size_t row_num = 0;
-        for (auto val : data)
-        {
-            ML_function_Linear->predictResultInto(val, *res, block, arguments);
-            ++row_num;
-        }
-
-    } else if (ML_function_Logistic)
-    {
-        size_t row_num = 0;
-        for (auto val : data)
-        {
-            ML_function_Logistic->predictResultInto(val, *res, block, arguments);
-            ++row_num;
-        }
-    } else 
+    else
     {
         throw Exception("Illegal aggregate function is passed",
                 ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
@@ -212,7 +196,7 @@ void ColumnAggregateFunction::insertRangeFrom(const IColumn & from, size_t start
 
         size_t old_size = data.size();
         data.resize(old_size + length);
-        memcpy(&data[old_size], &from_concrete.data[start], length * sizeof(data[0]));
+        memcpy(data.data() + old_size, &from_concrete.data[start], length * sizeof(data[0]));
     }
 }
 
@@ -244,7 +228,7 @@ ColumnPtr ColumnAggregateFunction::filter(const Filter & filter, ssize_t result_
 }
 
 
-ColumnPtr ColumnAggregateFunction::permute(const Permutation & perm, UInt64 limit) const
+ColumnPtr ColumnAggregateFunction::permute(const Permutation & perm, size_t limit) const
 {
     size_t size = data.size();
 
@@ -265,13 +249,13 @@ ColumnPtr ColumnAggregateFunction::permute(const Permutation & perm, UInt64 limi
     return res;
 }
 
-ColumnPtr ColumnAggregateFunction::index(const IColumn & indexes, UInt64 limit) const
+ColumnPtr ColumnAggregateFunction::index(const IColumn & indexes, size_t limit) const
 {
     return selectIndexImpl(*this, indexes, limit);
 }
 
 template <typename Type>
-ColumnPtr ColumnAggregateFunction::indexImpl(const PaddedPODArray<Type> & indexes, UInt64 limit) const
+ColumnPtr ColumnAggregateFunction::indexImpl(const PaddedPODArray<Type> & indexes, size_t limit) const
 {
     auto res = createView();
 
@@ -313,6 +297,11 @@ size_t ColumnAggregateFunction::allocatedBytes() const
         res += arena->size();
 
     return res;
+}
+
+void ColumnAggregateFunction::protect()
+{
+    data.protect();
 }
 
 MutableColumnPtr ColumnAggregateFunction::cloneEmpty() const

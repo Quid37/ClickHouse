@@ -25,7 +25,7 @@
 #include <Interpreters/Context.h>
 #include <IO/ConnectionTimeouts.h>
 #include <IO/UseSSL.h>
-#include <Interpreters/Settings.h>
+#include <Core/Settings.h>
 #include <Common/Exception.h>
 #include <Common/InterruptListener.h>
 
@@ -61,6 +61,7 @@ public:
         const std::string & default_database_,
         const std::string & user_,
         const std::string & password_,
+        const Settings & cmd_settings,
         const bool lite_output_,
         const std::string & profiles_file_,
         Strings && input_files_,
@@ -87,19 +88,10 @@ public:
         , input_files(input_files_)
         , log(&Poco::Logger::get("PerformanceTestSuite"))
     {
+        global_context.getSettingsRef().copyChangesFrom(cmd_settings);
         if (input_files.size() < 1)
             throw Exception("No tests were specified", ErrorCodes::BAD_ARGUMENTS);
     }
-
-    /// This functionality seems strange.
-    //void initialize(Poco::Util::Application & self [[maybe_unused]])
-    //{
-    //    std::string home_path;
-    //    const char * home_path_cstr = getenv("HOME");
-    //    if (home_path_cstr)
-    //        home_path = home_path_cstr;
-    //    configReadClient(Poco::Util::Application::instance().config(), home_path);
-    //}
 
     int run()
     {
@@ -201,7 +193,7 @@ private:
 
     std::pair<std::string, bool> runTest(XMLConfigurationPtr & test_config)
     {
-        PerformanceTestInfo info(test_config, profiles_file);
+        PerformanceTestInfo info(test_config, profiles_file, global_context.getSettingsRef());
         LOG_INFO(log, "Config for test '" << info.test_name << "' parsed");
         PerformanceTest current(test_config, connection, interrupt_listener, info, global_context, query_indexes[info.path]);
 
@@ -304,6 +296,8 @@ std::unordered_map<std::string, std::vector<std::size_t>> getTestQueryIndexes(co
 {
     std::unordered_map<std::string, std::vector<std::size_t>> result;
     const auto & options = parsed_opts.options;
+    if (options.empty())
+        return result;
     for (size_t i = 0; i < options.size() - 1; ++i)
     {
         const auto & opt = options[i];
@@ -350,7 +344,11 @@ try
         ("skip-names-regexp", value<Strings>()->multitoken(), "Do not run tests with names matching regexp")
         ("input-files", value<Strings>()->multitoken(), "Input .xml files")
         ("query-indexes", value<std::vector<size_t>>()->multitoken(), "Input query indexes")
-        ("recursive,r", "Recurse in directories to find all xml's");
+        ("recursive,r", "Recurse in directories to find all xml's")
+    ;
+
+    DB::Settings cmd_settings;
+    cmd_settings.addProgramOptions(desc);
 
     po::options_description cmdline_options;
     cmdline_options.add(desc);
@@ -397,6 +395,7 @@ try
         options["database"].as<std::string>(),
         options["user"].as<std::string>(),
         options["password"].as<std::string>(),
+        cmd_settings,
         options.count("lite") > 0,
         options["profiles-file"].as<std::string>(),
         std::move(input_files),
